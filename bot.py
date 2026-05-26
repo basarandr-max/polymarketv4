@@ -38,8 +38,8 @@ class Config:
     GAMMA_API = "https://gamma-api.polymarket.com"
 
     # ⚠ Token'ı ortam değişkeninden al; yoksa .env'den yükle
-    TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "BURAYA_TOKEN_GİR")
-    TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "BURAYA_CHAT_ID_GİR")
+    TELEGRAM_TOKEN   ="8664660615:AAE9yPONevqdeM9GbMDt5slksBxOXeYbidg"
+    TELEGRAM_CHAT_ID ="860803224"
 
     # Başlangıç trader listesi — web arayüzünden değiştirilebilir
     TRACKED_USERS: List[Dict] = [
