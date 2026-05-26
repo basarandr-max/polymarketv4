@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket Bot</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0c0f;
+    --surface:   #111318;
+    --border:    #1e2229;
+    --border2:   #2a2f3a;
+    --text:      #e8eaf0;
+    --muted:     #5a6070;
+    --green:     #00e676;
+    --green-dim: #00e67622;
+    --red:       #ff4444;
+    --red-dim:   #ff444422;
+    --blue:      #4fc3f7;
+    --blue-dim:  #4fc3f720;
+    --yellow:    #ffd740;
+    --accent:    #7c4dff;
+    --accent-dim:#7c4dff20;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    font-family: 'Space Mono', monospace;
+    font-size: 15px; font-weight: 700;
+    letter-spacing: .04em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+    transition: background .4s;
+  }
+  .logo-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+  .header-right { display: flex; gap: 10px; align-items: center; }
+  .badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; letter-spacing: .08em;
+    padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border2);
+    color: var(--muted);
+  }
+  .badge.test  { border-color: #ffd740; color: #ffd740; }
+  .badge.live  { border-color: var(--green); color: var(--green); }
+  .badge.scans { color: var(--muted); }
+
+  /* ── LAYOUT ── */
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 20px; }
+
+  /* ── CONTROLS ── */
+  .controls {
+    display: flex; gap: 10px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  button {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; letter-spacing: .06em; font-weight: 700;
+    padding: 10px 18px; border-radius: 6px; border: 1px solid;
+    cursor: pointer; transition: all .15s; text-transform: uppercase;
+    background: transparent;
+  }
+  .btn-start  { border-color: var(--green); color: var(--green); }
+  .btn-start:hover { background: var(--green-dim); }
+  .btn-stop   { border-color: var(--red); color: var(--red); }
+  .btn-stop:hover  { background: var(--red-dim); }
+  .btn-add    { border-color: var(--blue); color: var(--blue); }
+  .btn-add:hover   { background: var(--blue-dim); }
+  .btn-del    { border-color: var(--red); color: var(--red); font-size: 10px; padding: 5px 10px; }
+  .btn-del:hover   { background: var(--red-dim); }
+  .btn-save   { border-color: var(--accent); color: var(--accent); }
+  .btn-save:hover  { background: var(--accent-dim); }
+  button:disabled { opacity: .3; cursor: not-allowed; }
+
+  /* ── STATS GRID ── */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px; margin-bottom: 24px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    position: relative; overflow: hidden;
+  }
+  .stat::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent); opacity: .5;
+  }
+  .stat.green::before { background: var(--green); }
+  .stat.red::before   { background: var(--red); }
+  .stat.blue::before  { background: var(--blue); }
+  .stat-label {
+    font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 8px;
+    font-family: 'Space Mono', monospace;
+  }
+  .stat-value {
+    font-family: 'Space Mono', monospace;
+    font-size: 22px; font-weight: 700; line-height: 1;
+  }
+  .stat-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+
+  /* ── PANELS ── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 780px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .panel-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel-body { padding: 14px 18px; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 24px; }
+
+  /* ── TRADER LIST ── */
+  .trader-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .trader-item:last-child { border-bottom: none; }
+  .trader-name { font-weight: 500; font-size: 14px; }
+  .trader-wallet {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; color: var(--muted); margin-top: 2px;
+  }
+
+  /* ── ADD TRADER FORM ── */
+  .form-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  input[type=text] {
+    flex: 1; min-width: 120px;
+    background: var(--bg); border: 1px solid var(--border2);
+    border-radius: 6px; padding: 9px 12px;
+    color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px;
+    outline: none;
+  }
+  input[type=text]:focus { border-color: var(--blue); }
+
+  /* ── POSITIONS ── */
+  .pos-item {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .pos-item:last-child { border-bottom: none; }
+  .pos-side {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; font-weight: 700;
+    padding: 3px 7px; border-radius: 4px; letter-spacing: .04em;
+    flex-shrink: 0;
+  }
+  .yes { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+  .no  { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red);  }
+  .pos-info { flex: 1; min-width: 0; }
+  .pos-market { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pos-meta   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ── HISTORY TABLE ── */
+  .history-table { width: 100%; border-collapse: collapse; }
+  .history-table th {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); text-align: left;
+    padding: 8px 10px; border-bottom: 1px solid var(--border);
+  }
+  .history-table td {
+    padding: 10px 10px; border-bottom: 1px solid var(--border);
+    font-size: 12px; vertical-align: middle;
+  }
+  .history-table tr:last-child td { border-bottom: none; }
+  .history-table tr:hover td { background: #ffffff05; }
+
+  /* ── CONFIG PANEL ── */
+  .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .config-item label {
+    display: block; font-size: 11px; color: var(--muted);
+    margin-bottom: 5px; letter-spacing: .04em;
+    font-family: 'Space Mono', monospace; text-transform: uppercase;
+  }
+  input[type=number] {
+    width: 100%;
+    background: var(--bg); border: 1px solid var(--border2);
+    border-radius: 6px; padding: 9px 12px;
+    color: var(--text); font-family: 'Space Mono', monospace; font-size: 13px;
+    outline: none;
+  }
+  input[type=number]:focus { border-color: var(--accent); }
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .toggle-label { font-size: 13px; }
+  .toggle-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .switch {
+    position: relative; display: inline-block;
+    width: 40px; height: 22px; flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; cursor: pointer;
+    background: var(--border2); border-radius: 22px; transition: .2s;
+  }
+  .slider::before {
+    content: ''; position: absolute;
+    width: 16px; height: 16px; left: 3px; top: 3px;
+    background: var(--muted); border-radius: 50%; transition: .2s;
+  }
+  input:checked + .slider { background: var(--red); }
+  input:checked + .slider::before { transform: translateX(18px); background: white; }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 12px 18px;
+    font-size: 13px; z-index: 999;
+    transform: translateY(80px); opacity: 0;
+    transition: all .25s; pointer-events: none;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.ok  { border-color: var(--green); color: var(--green); }
+  #toast.err { border-color: var(--red);   color: var(--red); }
+
+  /* ── FULL WIDTH ── */
+  .full { margin-bottom: 16px; }
+  .section-gap { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot" id="statusDot"></div>
+    POLYMARKET BOT
+  </div>
+  <div class="header-right">
+    <span class="badge" id="modeBadge">TEST</span>
+    <span class="badge scans" id="scanBadge">0 SCAN</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button class="btn-start" id="btnStart" onclick="botStart()">▶ Başlat</button>
+    <button class="btn-stop"  id="btnStop"  onclick="botStop()" disabled>■ Durdur</button>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats" id="stats">
+    <div class="stat blue">
+      <div class="stat-label">Başlangıç</div>
+      <div class="stat-value" id="sInitial">$0</div>
+    </div>
+    <div class="stat blue">
+      <div class="stat-label">Nakit</div>
+      <div class="stat-value" id="sCash">$0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Açık Pozisyon</div>
+      <div class="stat-value" id="sOpen">$0</div>
+      <div class="stat-sub" id="sOpenCount">0 pozisyon</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Toplam Değer</div>
+      <div class="stat-value" id="sTotal">$0</div>
+    </div>
+    <div class="stat" id="sPnlCard">
+      <div class="stat-label">PnL</div>
+      <div class="stat-value" id="sPnl">$0</div>
+      <div class="stat-sub" id="sPnlPct">0%</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Win Rate</div>
+      <div class="stat-value" id="sWR">0%</div>
+      <div class="stat-sub" id="sWRL">0W / 0L</div>
+    </div>
+  </div>
+
+  <!-- POSITIONS + TRADERS -->
+  <div class="grid2">
+
+    <!-- OPEN POSITIONS -->
+    <div class="panel">
+      <div class="panel-header">
+        Açık Pozisyonlar
+        <span id="posCount" style="color:var(--text)">0</span>
+      </div>
+      <div class="panel-body" id="posBody">
+        <div class="empty">Henüz açık pozisyon yok</div>
+      </div>
+    </div>
+
+    <!-- TRADERS -->
+    <div class="panel">
+      <div class="panel-header">
+        Takip Edilen Traderlar
+        <span id="traderCount" style="color:var(--text)">0</span>
+      </div>
+      <div class="panel-body">
+        <div id="traderList"></div>
+        <div class="form-row">
+          <input type="text" id="tName"   placeholder="İsim"          style="max-width:120px">
+          <input type="text" id="tWallet" placeholder="0x... cüzdan adresi">
+          <button class="btn-add" onclick="addTrader()">+ Ekle</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- CONFIG -->
+  <div class="panel full">
+    <div class="panel-header">Ayarlar</div>
+    <div class="panel-body">
+      <div class="toggle-row" style="margin-bottom:14px">
+        <div>
+          <div class="toggle-label">Test Modu</div>
+          <div class="toggle-sub">Kapatınca gerçek işlem modu aktif olur</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="testMode" checked onchange="saveConfig()">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="config-grid">
+        <div class="config-item">
+          <label>Trade Boyutu ($)</label>
+          <input type="number" id="tradeSize" value="5" min="1" step="0.5">
+        </div>
+        <div class="config-item">
+          <label>Min Nakit ($)</label>
+          <input type="number" id="minCash" value="5" min="1" step="0.5">
+        </div>
+        <div class="config-item">
+          <label>Tarama Aralığı (sn)</label>
+          <input type="number" id="scanInterval" value="15" min="5" step="5">
+        </div>
+        <div class="config-item" style="display:flex;align-items:flex-end">
+          <button class="btn-save" onclick="saveConfig()" style="width:100%">💾 Kaydet</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORY -->
+  <div class="panel full">
+    <div class="panel-header">
+      İşlem Geçmişi
+      <span id="histCount" style="color:var(--text)">0</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Saat</th>
+            <th>Trader</th>
+            <th>Market</th>
+            <th>Yön</th>
+            <th>Giriş</th>
+            <th>Çıkış</th>
+            <th>Boyut</th>
+            <th>PnL</th>
+          </tr>
+        </thead>
+        <tbody id="histBody">
+          <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Henüz işlem yok</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+let refreshTimer = null;
+
+// ── TOAST ──
+function toast(msg, ok = true) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + (ok ? 'ok' : 'err');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', 2800);
+}
+
+// ── FORMAT ──
+function fmt(n)   { return '$' + Math.abs(n).toFixed(2); }
+function sign(n)  { return n >= 0 ? '+' : '-'; }
+function pct(n)   { return (n >= 0 ? '+' : '') + n.toFixed(1) + '%'; }
+function short(s, n=36) { return s.length > n ? s.slice(0, n) + '…' : s; }
+function shortW(w){ return w.slice(0,6) + '...' + w.slice(-4); }
+
+// ── REFRESH ──
+async function refresh() {
+  try {
+    const [s, h] = await Promise.all([
+      fetch('/api/status').then(r => r.json()),
+      fetch('/api/history').then(r => r.json()),
+    ]);
+    renderStatus(s);
+    renderHistory(h);
+  } catch(e) { console.warn('Refresh error:', e); }
+}
+
+function renderStatus(s) {
+  const p = s.portfolio;
+  const running = s.running;
+
+  // Header
+  document.getElementById('statusDot').className = 'logo-dot' + (running ? ' live' : '');
+  document.getElementById('scanBadge').textContent = s.scan_count + ' SCAN';
+  const mb = document.getElementById('modeBadge');
+  mb.textContent = s.test_mode ? 'TEST' : 'CANLI';
+  mb.className   = 'badge ' + (s.test_mode ? 'test' : 'live');
+
+  // Buttons
+  document.getElementById('btnStart').disabled = running;
+  document.getElementById('btnStop').disabled  = !running;
+
+  // Stats
+  document.getElementById('sInitial').textContent = fmt(p.initial_capital);
+  document.getElementById('sCash').textContent    = fmt(p.cash);
+  document.getElementById('sOpen').textContent    = fmt(p.open_value);
+  document.getElementById('sOpenCount').textContent = p.open_positions.length + ' pozisyon';
+  document.getElementById('sTotal').textContent   = fmt(p.total_value);
+
+  const pnlEl = document.getElementById('sPnl');
+  const pnlCard = document.getElementById('sPnlCard');
+  pnlEl.textContent = (p.total_pnl >= 0 ? '+' : '-') + fmt(p.total_pnl);
+  pnlEl.className   = 'stat-value ' + (p.total_pnl >= 0 ? 'pos' : 'neg');
+  pnlCard.className = 'stat ' + (p.total_pnl >= 0 ? 'green' : 'red');
+  document.getElementById('sPnlPct').textContent = pct(p.pnl_percent);
+
+  document.getElementById('sWR').textContent  = p.win_rate + '%';
+  document.getElementById('sWRL').textContent = p.winning_trades + 'W / ' + p.losing_trades + 'L';
+
+  // Positions
+  document.getElementById('posCount').textContent = p.open_positions.length;
+  const pb = document.getElementById('posBody');
+  if (p.open_positions.length === 0) {
+    pb.innerHTML = '<div class="empty">Henüz açık pozisyon yok</div>';
+  } else {
+    pb.innerHTML = p.open_positions.map(pos => `
+      <div class="pos-item">
+        <span class="pos-side ${pos.side.toLowerCase()}">${pos.side}</span>
+        <div class="pos-info">
+          <div class="pos-market">${short(pos.market_title)}</div>
+          <div class="pos-meta">${pos.trader_name} · Giriş $${pos.entry_price.toFixed(3)} · $${pos.size_usd.toFixed(2)} · ${pos.opened_at}</div>
+        </div>
+      </div>`).join('');
+  }
+
+  // Traders
+  document.getElementById('traderCount').textContent = s.tracked_users.length;
+  const tl = document.getElementById('traderList');
+  if (s.tracked_users.length === 0) {
+    tl.innerHTML = '<div class="empty">Takip edilen trader yok</div>';
+  } else {
+    tl.innerHTML = s.tracked_users.map(u => `
+      <div class="trader-item">
+        <div>
+          <div class="trader-name">${u.name}</div>
+          <div class="trader-wallet">${shortW(u.wallet)}</div>
+        </div>
+        <button class="btn-del" onclick="delTrader('${u.wallet}','${u.name}')">✕ Çıkar</button>
+      </div>`).join('');
+  }
+}
+
+function renderHistory(h) {
+  document.getElementById('histCount').textContent = h.length;
+  const tb = document.getElementById('histBody');
+  if (h.length === 0) {
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Henüz işlem yok</td></tr>';
+    return;
+  }
+  tb.innerHTML = h.slice(0, 100).map(t => {
+    const cls = t.pnl >= 0 ? 'pos' : 'neg';
+    return `
+      <tr>
+        <td style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)">${t.time}</td>
+        <td>${t.trader}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.market}</td>
+        <td><span class="pos-side ${t.side.toLowerCase()}" style="font-size:9px;padding:2px 6px">${t.side}</span></td>
+        <td style="font-family:'Space Mono',monospace">$${t.entry.toFixed(3)}</td>
+        <td style="font-family:'Space Mono',monospace">$${t.exit.toFixed(3)}</td>
+        <td style="font-family:'Space Mono',monospace">$${t.size.toFixed(2)}</td>
+        <td style="font-family:'Space Mono',monospace;font-weight:700" class="${cls}">
+          ${t.pnl >= 0 ? '+' : ''}$${Math.abs(t.pnl).toFixed(2)}
+          <span style="font-size:10px;opacity:.7">(${t.pnl_percent.toFixed(1)}%)</span>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+// ── BOT CONTROLS ──
+async function botStart() {
+  const r = await fetch('/api/start', {method:'POST'}).then(r=>r.json());
+  toast(r.msg, r.ok);
+  if (r.ok) startRefresh();
+}
+async function botStop() {
+  const r = await fetch('/api/stop', {method:'POST'}).then(r=>r.json());
+  toast(r.msg, r.ok);
+}
+
+// ── TRADER ──
+async function addTrader() {
+  const name   = document.getElementById('tName').value.trim();
+  const wallet = document.getElementById('tWallet').value.trim();
+  if (!name || !wallet) { toast('İsim ve cüzdan gerekli', false); return; }
+  const r = await fetch('/api/traders', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, wallet})
+  }).then(r=>r.json());
+  toast(r.msg, r.ok);
+  if (r.ok) {
+    document.getElementById('tName').value = '';
+    document.getElementById('tWallet').value = '';
+    refresh();
+  }
+}
+async function delTrader(wallet, name) {
+  if (!confirm(`${name} silinsin mi?`)) return;
+  const r = await fetch('/api/traders/' + wallet, {method:'DELETE'}).then(r=>r.json());
+  toast(r.msg, r.ok);
+  if (r.ok) refresh();
+}
+
+// ── CONFIG ──
+async function saveConfig() {
+  const r = await fetch('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      trade_size:    parseFloat(document.getElementById('tradeSize').value),
+      min_cash:      parseFloat(document.getElementById('minCash').value),
+      scan_interval: parseInt(document.getElementById('scanInterval').value),
+      test_mode:     document.getElementById('testMode').checked,
+    })
+  }).then(r=>r.json());
+  toast(r.msg, r.ok);
+}
+
+// ── AUTO REFRESH ──
+function startRefresh() {
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(refresh, 4000);
+}
+
+// INIT
+refresh();
+startRefresh();
+</script>
+</body>
+</html>
