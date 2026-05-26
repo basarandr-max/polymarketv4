@@ -127,7 +127,7 @@ app_state = {
 class TelegramNotifier:
     def __init__(self):
         self.token   = "8664660615:AAFZ3gJOnMmjhuyiLymI0WdV1sxwcDqpzs4"
-        self.chat_id ="860803224"
+        self.chat_id = "860803224"
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self):
