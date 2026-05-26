@@ -38,8 +38,8 @@ class Config:
     GAMMA_API = "https://gamma-api.polymarket.com"
 
     # ⚠ Token'ı ortam değişkeninden al; yoksa .env'den yükle
-    TELEGRAM_TOKEN   = os.environ.get("8664660615:AAFZ3gJOnMmjhuyiLymI0WdV1sxwcDqpzs4")
-    TELEGRAM_CHAT_ID = os.environ.get("860803224")
+    TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "BURAYA_TOKEN_GİR")
+    TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "BURAYA_CHAT_ID_GİR")
 
     # Başlangıç trader listesi — web arayüzünden değiştirilebilir
     TRACKED_USERS: List[Dict] = [
@@ -126,8 +126,8 @@ app_state = {
 # ==================== TELEGRAM ====================
 class TelegramNotifier:
     def __init__(self):
-        self.token   = "8664660615:AAFZ3gJOnMmjhuyiLymI0WdV1sxwcDqpzs4"
-        self.chat_id = "860803224"
+        self.token   = Config.TELEGRAM_TOKEN
+        self.chat_id = Config.TELEGRAM_CHAT_ID
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self):
