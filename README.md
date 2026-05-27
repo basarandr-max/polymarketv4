@@ -61,6 +61,7 @@ yani sen manuel kopyalıyorsun — bot seni bilgilendiriyor).
 polymarket-bot/
 ├── bot.py        ← Ana bot + Flask API
 └── index.html    ← Web dashboard
+v4.1
 ```
 
 ## Sık Karşılaşılan Sorunlar
