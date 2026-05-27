@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-POLYMARKET COPY TRADING BOT v4.0
-=================================
-- Flask web dashboard (port 5000)
-- Trader ekle/çıkar (runtime)
-- Bot başlat/durdur
-- Canlı portföy + işlem geçmişi
-- Tüm v3.3 bugfix'leri dahil
-"""
-
 import asyncio
 import aiohttp
 import time
@@ -25,23 +15,25 @@ import sys
 
 from flask import Flask, jsonify, request, send_from_directory
 
-# ==================== CONFIG ====================
 class Config:
-    TEST_MODE        = True           # False yapınca gerçek işlem modu
+    TEST_MODE        = True
     INITIAL_CAPITAL  = Decimal('50')
     TRADE_SIZE       = Decimal('5')
     MIN_CASH         = Decimal('5')
-    SCAN_INTERVAL    = 15
+    SCAN_INTERVAL    = 60
     MIN_USDC_SIZE    = Decimal('1')
-
     DATA_API  = "https://data-api.polymarket.com"
     GAMMA_API = "https://gamma-api.polymarket.com"
 
-    # ⚠ Token'ı ortam değişkeninden al; yoksa .env'den yükle
-    TELEGRAM_TOKEN   ="8664660615:AAE9yPONevqdeM9GbMDt5slksBxOXeYbidg"
-    TELEGRAM_CHAT_ID ="860803224"
+    # Token'ları doğrudan os.environ'dan oku
+    @staticmethod
+    def get_token():
+        return os.environ.get("TELEGRAM_TOKEN", "")
+    
+    @staticmethod
+    def get_chat_id():
+        return os.environ.get("TELEGRAM_CHAT_ID", "")
 
-    # Başlangıç trader listesi — web arayüzünden değiştirilebilir
     TRACKED_USERS: List[Dict] = [
         {"name": "Oddn",              "wallet": "0xa53c26443fb636d8ae31ac24f62fc1d5ef8f67a5"},
         {"name": "Swisstony",         "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
@@ -51,7 +43,6 @@ class Config:
         {"name": "Tiger200",          "wallet": "0x6211f97a76ed5c4b1d658f637041ac5f293db89e"},
     ]
 
-# ==================== STATE ====================
 @dataclass
 class Position:
     position_id:  str
@@ -112,40 +103,47 @@ class Portfolio:
             "open_positions":  [p.to_dict() for p in self.open_positions.values()],
         }
 
-# Global paylaşımlı durum
 app_state = {
-    "running":      False,
-    "scan_count":   0,
-    "portfolio":    Portfolio(),
-    "trade_history": [],          # [{...}, ...]
+    "running":       False,
+    "scan_count":    0,
+    "portfolio":     Portfolio(),
+    "trade_history": [],
     "tracked_users": list(Config.TRACKED_USERS),
-    "bot_thread":   None,
-    "loop":         None,
+    "bot_thread":    None,
 }
 
-# ==================== TELEGRAM ====================
 class TelegramNotifier:
     def __init__(self):
-        self.token   = "8664660615:AAFZ3gJOnMmjhuyiLymI0WdVlsxwcDqpzs4"
-        self.chat_id = "860803224"
+        # Her seferinde env'den oku — Railway değişken güncellemelerini yakalar
+        self.token   = os.environ.get("TELEGRAM_TOKEN", "")
+        self.chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession(); return self
+        self.session = aiohttp.ClientSession()
+        return self
+
     async def __aexit__(self, *_):
-        if self.session: await self.session.close()
+        if self.session:
+            await self.session.close()
 
     async def send(self, msg: str):
-        if self.token in ("BURAYA_TOKEN_GİR", ""):
-            logging.debug("Telegram token ayarlanmadı, bildirim atlandı.")
+        if not self.token or not self.chat_id:
+            logging.warning("Telegram token veya chat_id eksik!")
             return
+        logging.info(f"Telegram'a mesaj gönderiliyor: {msg[:50]}...")
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         try:
             async with self.session.post(url, json={
-                "chat_id": self.chat_id, "text": msg, "parse_mode": "Markdown"
-            }) as resp:
+                "chat_id": self.chat_id,
+                "text": msg,
+                "parse_mode": "Markdown"
+            }, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                result = await resp.json()
                 if resp.status != 200:
-                    logging.warning(f"Telegram {resp.status}: {await resp.text()}")
+                    logging.warning(f"Telegram {resp.status}: {result}")
+                else:
+                    logging.info("Telegram mesajı gönderildi!")
         except Exception as e:
             logging.error(f"Telegram hatası: {e}")
 
@@ -157,28 +155,25 @@ class TelegramNotifier:
             f"Market: {pos.market_title[:50]}\n"
             f"Yön: *{pos.side}*\n"
             f"Giriş: ${pos.entry_price:.3f}\n"
-            f"Boyut: ${pos.size_usd:.2f}\n"
-            f"Saat: {pos.opened_at.strftime('%H:%M:%S')}\n\n"
-            f"💼 Nakit: ${p.cash:.2f} | Açık: {len(p.open_positions)}\n"
-            f"📊 Toplam: ${p.total_value:.2f} | PnL: {sign}${p.total_pnl:.2f}"
+            f"Boyut: ${pos.size_usd:.2f}\n\n"
+            f"Nakit: ${p.cash:.2f} | Açık: {len(p.open_positions)}\n"
+            f"Toplam: ${p.total_value:.2f} | PnL: {sign}${p.total_pnl:.2f}"
         )
 
     async def send_close(self, pos: Position, pnl: Decimal, exit_price: Decimal, p: Portfolio):
         ts = "+" if pnl >= 0 else ""
-        ps = "+" if p.total_pnl >= 0 else ""
         wr = (p.winning_trades / p.total_trades * 100) if p.total_trades > 0 else 0
         await self.send(
             f"[POZİSYON KAPANDI]\n\n"
             f"Trader: *{pos.trader_name}*\n"
             f"Market: {pos.market_title[:50]}\n"
-            f"Giriş: ${pos.entry_price:.3f} → Çıkış: ${exit_price:.3f}\n"
+            f"Giriş: ${pos.entry_price:.3f} - Cikis: ${exit_price:.3f}\n"
             f"Trade PnL: {ts}${pnl:.2f}\n\n"
-            f"💼 Nakit: ${p.cash:.2f}\n"
-            f"📊 Toplam: ${p.total_value:.2f} | PnL: {ps}${p.total_pnl:.2f}\n"
-            f"🏆 Win Rate: {wr:.0f}% ({p.winning_trades}W/{p.losing_trades}L)"
+            f"Nakit: ${p.cash:.2f}\n"
+            f"Toplam: ${p.total_value:.2f} | PnL: ${p.total_pnl:.2f}\n"
+            f"Win Rate: {wr:.0f}% ({p.winning_trades}W/{p.losing_trades}L)"
         )
 
-# ==================== TRACKER ====================
 class UserTracker:
     def __init__(self, users: List[Dict]):
         self.users    = users
@@ -249,11 +244,10 @@ class UserTracker:
             trades.extend(await self.get_new_trades(u))
         return trades
 
-# ==================== MAIN BOT ====================
 class PolymarketBot:
     def __init__(self):
-        self.portfolio      = app_state["portfolio"]
-        self.no_cash_noted  = False
+        self.portfolio     = app_state["portfolio"]
+        self.no_cash_noted = False
 
     def _pos_id(self, wallet, cid, oi):
         side = "YES" if oi == 1 else "NO"
@@ -268,7 +262,7 @@ class PolymarketBot:
         if pid in self.portfolio.open_positions: return
         if self.portfolio.cash < Config.MIN_CASH:
             if not self.no_cash_noted:
-                await notifier.send(f"[NAKİT YETERSİZ] ${self.portfolio.cash:.2f} - yeni pozisyon açılamıyor.")
+                await notifier.send(f"[NAKİT YETERSİZ] ${self.portfolio.cash:.2f}")
                 self.no_cash_noted = True
             return
         self.no_cash_noted = False
@@ -289,7 +283,7 @@ class PolymarketBot:
         )
         self.portfolio.open_positions[pid] = pos
         self.portfolio.cash -= Config.TRADE_SIZE
-        logging.info(f"AÇILDI: {name} | {side} | ${Config.TRADE_SIZE} | Nakit: ${self.portfolio.cash:.2f}")
+        logging.info(f"AÇILDI: {name} | {side} | ${Config.TRADE_SIZE}")
         await notifier.send_open(pos, self.portfolio)
 
     async def close_pos(self, act: Dict, notifier: TelegramNotifier):
@@ -309,13 +303,12 @@ class PolymarketBot:
         shares = pos.size_usd / pos.entry_price
         pnl    = shares * (ep - pos.entry_price)
 
-        self.portfolio.cash          += pos.size_usd + pnl
-        self.portfolio.realized_pnl  += pnl
-        self.portfolio.total_trades  += 1
+        self.portfolio.cash         += pos.size_usd + pnl
+        self.portfolio.realized_pnl += pnl
+        self.portfolio.total_trades += 1
         if pnl >= 0: self.portfolio.winning_trades += 1
         else:        self.portfolio.losing_trades  += 1
 
-        # Geçmişe ekle
         app_state["trade_history"].insert(0, {
             "time":        datetime.now().strftime("%H:%M:%S"),
             "date":        datetime.now().strftime("%d/%m/%Y"),
@@ -332,26 +325,31 @@ class PolymarketBot:
             app_state["trade_history"] = app_state["trade_history"][:200]
 
         del self.portfolio.open_positions[pid]
-        logging.info(f"KAPANDI: {pos.trader_name} | PnL: ${pnl:.2f} | Nakit: ${self.portfolio.cash:.2f}")
+        logging.info(f"KAPANDI: {pos.trader_name} | PnL: ${pnl:.2f}")
         await notifier.send_close(pos, pnl, ep, self.portfolio)
 
     async def run_loop(self):
         app_state["running"] = True
-        tracker = UserTracker(list(app_state["tracked_users"]))
-
+        logging.info("Bot döngüsü başlıyor...")
+        
+        # Başlangıç mesajı
         async with TelegramNotifier() as notifier:
+            token = os.environ.get("TELEGRAM_TOKEN", "YOK")
+            chat  = os.environ.get("TELEGRAM_CHAT_ID", "YOK")
+            logging.info(f"Token uzunlugu: {len(token)}, Chat ID: {chat}")
             await notifier.send(
-                f"[BOT v4.0 BAŞLADI]\n"
+                f"BOT v4.0 BASLADI\n"
                 f"Kapital: ${Config.INITIAL_CAPITAL} | Trade: ${Config.TRADE_SIZE}\n"
-                f"Trader: {len(app_state['tracked_users'])} kişi\n"
-                f"Mod: {'🧪 TEST' if Config.TEST_MODE else '🟢 GERÇEK'}"
+                f"Trader: {len(app_state['tracked_users'])} kisi\n"
+                f"Mod: TEST" if Config.TEST_MODE else "Mod: GERCEK"
             )
+
+        tracker = UserTracker(list(app_state["tracked_users"]))
 
         while app_state["running"]:
             app_state["scan_count"] += 1
-            # Tracker'ı güncel kullanıcı listesiyle senkronize et
-            current_wallets  = {u["wallet"] for u in app_state["tracked_users"]}
-            tracker_wallets  = {u["wallet"] for u in tracker.users}
+            current_wallets = {u["wallet"] for u in app_state["tracked_users"]}
+            tracker_wallets = {u["wallet"] for u in tracker.users}
             for u in app_state["tracked_users"]:
                 if u["wallet"] not in tracker_wallets:
                     tracker.add_user(u)
@@ -376,32 +374,35 @@ class PolymarketBot:
                         p = self.portfolio
                         sign = "+" if p.total_pnl >= 0 else ""
                         await notifier.send(
-                            f"[PERİYODİK RAPOR]\n"
-                            f"Toplam: ${p.total_value:.2f} | PnL: {sign}${p.total_pnl:.2f} ({sign}{p.pnl_percent:.1f}%)\n"
-                            f"Açık: {len(p.open_positions)} | Trade: {p.total_trades}"
+                            f"[RAPOR] Tarama #{app_state['scan_count']}\n"
+                            f"Toplam: ${p.total_value:.2f} | PnL: {sign}${p.total_pnl:.2f}\n"
+                            f"Acik: {len(p.open_positions)} | Trade: {p.total_trades}"
                         )
             except Exception as e:
-                logging.error(f"Scan hatası: {e}")
+                logging.error(f"Scan hatasi: {e}")
 
             await asyncio.sleep(Config.SCAN_INTERVAL)
 
         async with TelegramNotifier() as notifier:
             p = self.portfolio
-            sign = "+" if p.total_pnl >= 0 else ""
             await notifier.send(
                 f"[BOT DURDURULDU]\n"
-                f"Toplam: ${p.total_value:.2f} | PnL: {sign}${p.total_pnl:.2f}\n"
+                f"Toplam: ${p.total_value:.2f} | PnL: ${p.total_pnl:.2f}\n"
                 f"Trade: {p.total_trades} ({p.winning_trades}W/{p.losing_trades}L)"
             )
 
 def start_bot():
     loop = asyncio.new_event_loop()
-    app_state["loop"] = loop
+    asyncio.set_event_loop(loop)
     bot = PolymarketBot()
-    loop.run_until_complete(bot.run_loop())
-    loop.close()
+    try:
+        loop.run_until_complete(bot.run_loop())
+    except Exception as e:
+        logging.error(f"Bot hatasi: {e}")
+        app_state["running"] = False
+    finally:
+        loop.close()
 
-# ==================== FLASK API ====================
 flask_app = Flask(__name__, static_folder=".")
 
 @flask_app.route("/")
@@ -412,11 +413,12 @@ def index():
 def status():
     p = app_state["portfolio"]
     return jsonify({
-        "running":      app_state["running"],
-        "scan_count":   app_state["scan_count"],
-        "test_mode":    Config.TEST_MODE,
-        "portfolio":    p.to_dict(),
+        "running":       app_state["running"],
+        "scan_count":    app_state["scan_count"],
+        "test_mode":     Config.TEST_MODE,
+        "portfolio":     p.to_dict(),
         "tracked_users": app_state["tracked_users"],
+        "telegram_ok":   bool(os.environ.get("TELEGRAM_TOKEN")),
     })
 
 @flask_app.route("/api/history")
@@ -426,16 +428,16 @@ def history():
 @flask_app.route("/api/start", methods=["POST"])
 def start():
     if app_state["running"]:
-        return jsonify({"ok": False, "msg": "Bot zaten çalışıyor"})
+        return jsonify({"ok": False, "msg": "Bot zaten calisiyor"})
     t = threading.Thread(target=start_bot, daemon=True)
     app_state["bot_thread"] = t
     t.start()
-    return jsonify({"ok": True, "msg": "Bot başlatıldı"})
+    return jsonify({"ok": True, "msg": "Bot baslatildi"})
 
 @flask_app.route("/api/stop", methods=["POST"])
 def stop():
     if not app_state["running"]:
-        return jsonify({"ok": False, "msg": "Bot zaten durmuş"})
+        return jsonify({"ok": False, "msg": "Bot zaten durmus"})
     app_state["running"] = False
     return jsonify({"ok": True, "msg": "Bot durduruldu"})
 
@@ -445,17 +447,16 @@ def get_traders():
 
 @flask_app.route("/api/traders", methods=["POST"])
 def add_trader():
-    data = request.json or {}
+    data   = request.json or {}
     name   = data.get("name", "").strip()
     wallet = data.get("wallet", "").strip().lower()
     if not name or not wallet:
-        return jsonify({"ok": False, "msg": "İsim ve cüzdan gerekli"})
+        return jsonify({"ok": False, "msg": "Isim ve cuzdan gerekli"})
     if not wallet.startswith("0x") or len(wallet) != 42:
-        return jsonify({"ok": False, "msg": "Geçersiz cüzdan adresi (0x... 42 karakter)"})
+        return jsonify({"ok": False, "msg": "Gecersiz cuzdan adresi"})
     if any(u["wallet"] == wallet for u in app_state["tracked_users"]):
-        return jsonify({"ok": False, "msg": "Bu cüzdan zaten takip ediliyor"})
+        return jsonify({"ok": False, "msg": "Bu cuzdan zaten takip ediliyor"})
     app_state["tracked_users"].append({"name": name, "wallet": wallet})
-    logging.info(f"Trader eklendi: {name} ({wallet})")
     return jsonify({"ok": True, "msg": f"{name} eklendi"})
 
 @flask_app.route("/api/traders/<wallet>", methods=["DELETE"])
@@ -463,23 +464,18 @@ def del_trader(wallet):
     before = len(app_state["tracked_users"])
     app_state["tracked_users"] = [u for u in app_state["tracked_users"] if u["wallet"] != wallet]
     if len(app_state["tracked_users"]) == before:
-        return jsonify({"ok": False, "msg": "Bulunamadı"})
-    logging.info(f"Trader silindi: {wallet}")
+        return jsonify({"ok": False, "msg": "Bulunamadi"})
     return jsonify({"ok": True, "msg": "Trader silindi"})
 
 @flask_app.route("/api/config", methods=["POST"])
 def update_config():
     data = request.json or {}
     try:
-        if "trade_size" in data:
-            Config.TRADE_SIZE = Decimal(str(data["trade_size"]))
-        if "min_cash" in data:
-            Config.MIN_CASH = Decimal(str(data["min_cash"]))
-        if "scan_interval" in data:
-            Config.SCAN_INTERVAL = int(data["scan_interval"])
-        if "test_mode" in data:
-            Config.TEST_MODE = bool(data["test_mode"])
-        return jsonify({"ok": True, "msg": "Ayarlar güncellendi"})
+        if "trade_size"    in data: Config.TRADE_SIZE    = Decimal(str(data["trade_size"]))
+        if "min_cash"      in data: Config.MIN_CASH      = Decimal(str(data["min_cash"]))
+        if "scan_interval" in data: Config.SCAN_INTERVAL = int(data["scan_interval"])
+        if "test_mode"     in data: Config.TEST_MODE     = bool(data["test_mode"])
+        return jsonify({"ok": True, "msg": "Ayarlar guncellendi"})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
 
@@ -491,6 +487,8 @@ if __name__ == "__main__":
     )
     print("=" * 50)
     print("  POLYMARKET BOT v4.0")
+    print(f"  Token: {'OK' if os.environ.get('TELEGRAM_TOKEN') else 'EKSIK'}")
+    print(f"  Chat ID: {'OK' if os.environ.get('TELEGRAM_CHAT_ID') else 'EKSIK'}")
     print("  Dashboard: http://localhost:5000")
     print("=" * 50)
     flask_app.run(host="0.0.0.0", port=5000, debug=False)
