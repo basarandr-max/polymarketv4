@@ -64,23 +64,19 @@ class PolymarketClient:
             logging.warning("PRIVATE_KEY eksik - TEST modunda calisiyor")
             return
         try:
-            from py_clob_client.client import ClobClient
-            self.client = ClobClient(
-                Config.CLOB_HOST,
-                key=Config.PRIVATE_KEY,
-                chain_id=Config.CHAIN_ID,
-                signature_type=0,
-                funder=Config.FUNDER,
+            from py_clob_client_v2 import ClobClient, ApiCreds
+            creds = ApiCreds(
+                api_key=Config.CLOB_API_KEY,
+                api_secret=Config.CLOB_SECRET,
+                api_passphrase=Config.CLOB_PASS_PHRASE,
             )
-            # MetaMask EOA için allowance kontrolü
-            try:
-                self.client.update_balance_allowance()
-                self.client.update_collateral_allowance()
-                logging.info("Allowance ayarlandi!")
-            except Exception as e:
-                logging.warning(f"Allowance hatasi (normal olabilir): {e}")
-            self.client.set_api_creds(self.client.create_or_derive_api_creds())
-            logging.info("Polymarket CLOB baglantisi OK!")
+            self.client = ClobClient(
+                host=Config.CLOB_HOST,
+                chain_id=Config.CHAIN_ID,
+                key=Config.PRIVATE_KEY,
+                creds=creds,
+            )
+            logging.info("Polymarket V2 CLOB baglantisi OK!")
         except Exception as e:
             logging.error(f"CLOB baglanti hatasi: {e}")
             self.client = None
@@ -120,17 +116,19 @@ class PolymarketClient:
             if not token_id:
                 logging.error(f"Token ID bulunamadi: {condition_id}")
                 return None
-            from py_clob_client.clob_types import OrderArgs
-            from py_clob_client.order_builder.constants import BUY
+            from py_clob_client_v2 import OrderArgs, OrderType, PartialCreateOrderOptions
+            from py_clob_client_v2.order_builder.constants import BUY
             order_args = OrderArgs(
                 token_id=token_id,
                 price=round(price, 3),
                 size=round(size, 2),
                 side=BUY,
             )
-            signed = self.client.create_order(order_args)
-            from py_clob_client.clob_types import OrderType
-            resp = self.client.post_order(signed, OrderType.GTC)
+            resp = self.client.create_and_post_order(
+                order_args=order_args,
+                options=PartialCreateOrderOptions(tick_size="0.01"),
+                order_type=OrderType.GTC,
+            )
             logging.info(f"BUY emri gonderildi: {resp}")
             return resp
         except Exception as e:
@@ -148,17 +146,19 @@ class PolymarketClient:
             if not token_id:
                 logging.error(f"Token ID bulunamadi: {condition_id}")
                 return None
-            from py_clob_client.clob_types import OrderArgs
-            from py_clob_client.order_builder.constants import SELL
+            from py_clob_client_v2 import OrderArgs, OrderType, PartialCreateOrderOptions
+            from py_clob_client_v2.order_builder.constants import SELL
             order_args = OrderArgs(
                 token_id=token_id,
                 price=round(price, 3),
                 size=round(size, 2),
                 side=SELL,
             )
-            signed = self.client.create_order(order_args)
-            from py_clob_client.clob_types import OrderType
-            resp = self.client.post_order(signed, OrderType.GTC)
+            resp = self.client.create_and_post_order(
+                order_args=order_args,
+                options=PartialCreateOrderOptions(tick_size="0.01"),
+                order_type=OrderType.GTC,
+            )
             logging.info(f"SELL emri gonderildi: {resp}")
             return resp
         except Exception as e:
@@ -333,7 +333,7 @@ async def run_bot():
     mod = "TEST" if Config.TEST_MODE else "GERCEK"
     async with TelegramNotifier() as notifier:
         await notifier.send(
-            f"BOT v5.0 BASLADI\n"
+            f"BOT v5.2 BASLADI\n"
             f"Mod: *{mod}*\n"
             f"Trade boyutu: ${Config.TRADE_SIZE}\n"
             f"Trader sayisi: {len(app_state['tracked_users'])}\n"
@@ -533,7 +533,7 @@ if __name__ == "__main__":
         handlers=[logging.StreamHandler(sys.stdout)]
     )
     print("=" * 50)
-    print("  POLYMARKET BOT v5.0")
+    print("  POLYMARKET BOT v5.2")
     print(f"  Token: {'OK' if os.environ.get('TELEGRAM_TOKEN') else 'EKSIK'}")
     print(f"  Private Key: {'OK' if os.environ.get('PRIVATE_KEY') else 'EKSIK'}")
     print(f"  Mod: {'TEST' if Config.TEST_MODE else 'GERCEK'}")
