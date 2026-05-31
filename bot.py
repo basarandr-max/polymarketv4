@@ -125,7 +125,7 @@ class PolymarketClient:
                 api_passphrase=Config.CLOB_PASS_PHRASE,
             )
             import httpx
-            http_client = httpx.Client(proxies={"http://": "http://nkombbpe:2d9a5jydr5vr@64.137.96.74:6641", "https://": "http://nkombbpe:2d9a5jydr5vr@64.137.96.74:6641"})
+            http_client = httpx.Client(proxy="http://nkombbpe:2d9a5jydr5vr@64.137.96.74:6641")
             self.client = ClobClient(
                 host=Config.CLOB_HOST,
                 chain_id=Config.CHAIN_ID,
