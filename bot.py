@@ -520,12 +520,25 @@ async def run_bot():
     poly = PolymarketClient()
     app_state["poly_client"] = poly
 
-    # Başlangıçta pozisyonları temizle ve gerçek bakiyeyi çek
-    portfolio.open_positions.clear()
-    app_state["seen_conditions"].clear()
-    logging.info("Pozisyonlar temizlendi, sifirdan basliyor")
+    # Başlangıçta gerçek bakiyeyi çek, pozisyonları TEMIZLEME
+    logging.info("Bot basliyor, mevcut pozisyonlar korunuyor...")
     if not Config.TEST_MODE and poly.client:
         poly.sync_portfolio_balance(portfolio)
+        # Polymarket'ten açık pozisyonları çek ve seen_conditions'a ekle
+        try:
+            import requests
+            url = f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0.01"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                positions = resp.json()
+                logging.info(f"Polymarket'te {len(positions)} acik pozisyon bulundu")
+                for p in positions:
+                    cond_id = p.get("conditionId", "")
+                    if cond_id:
+                        app_state["seen_conditions"].add(cond_id)
+                logging.info(f"seen_conditions guncellendi: {len(app_state['seen_conditions'])} pozisyon")
+        except Exception as e:
+            logging.error(f"Pozisyon senkronizasyon hatasi: {e}")
         open_value = sum(p.size_usd for p in portfolio.open_positions.values())
         portfolio.initial_capital = portfolio.cash + open_value
         logging.info(f"Portföy senkronize: Cash=${portfolio.cash:.2f}, Toplam=${portfolio.initial_capital:.2f}")
