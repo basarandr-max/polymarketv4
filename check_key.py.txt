@@ -1,0 +1,10 @@
+echo from eth_account import Account > check_key.py
+echo private_key = "0x..." >> check_key.py
+echo account = Account.from_key(private_key) >> check_key.py
+echo print(f"Adres: {account.address}") >> check_key.py
+from eth_account import Account
+
+private_key = "0x..."  # .env'deki PRIVATE_KEY değerini buraya yapıştır
+
+account = Account.from_key(private_key)
+print(f"Private key adresi: {account.address}")
