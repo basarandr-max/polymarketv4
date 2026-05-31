@@ -451,12 +451,19 @@ function renderStatus(s) {
   document.getElementById('btnStart').disabled = running;
   document.getElementById('btnStop').disabled  = !running;
 
-  // Stats
+  // Stats - gercek degerler
   document.getElementById('sInitial').textContent = fmt(p.initial_capital);
   document.getElementById('sCash').textContent    = fmt(p.cash);
-  document.getElementById('sOpen').textContent    = fmt(p.open_value);
-  document.getElementById('sOpenCount').textContent = p.open_positions.length + ' pozisyon';
-  document.getElementById('sTotal').textContent   = fmt(p.total_value);
+  
+  // Gercek pozisyon degeri
+  const realOpenValue = p.real_positions_value || p.open_value;
+  const realOpenCount = p.real_positions_count !== undefined ? p.real_positions_count : p.open_positions.length;
+  document.getElementById('sOpen').textContent    = fmt(realOpenValue);
+  document.getElementById('sOpenCount').textContent = realOpenCount + ' pozisyon';
+  
+  // Toplam = cash + gercek pozisyon degeri
+  const realTotal = p.cash + realOpenValue;
+  document.getElementById('sTotal').textContent   = fmt(realTotal);
 
   const pnlEl = document.getElementById('sPnl');
   const pnlCard = document.getElementById('sPnlCard');
@@ -589,3 +596,4 @@ startRefresh();
 </script>
 </body>
 </html>
+
