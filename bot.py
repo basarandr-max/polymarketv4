@@ -124,6 +124,8 @@ class PolymarketClient:
                 api_secret=Config.CLOB_SECRET,
                 api_passphrase=Config.CLOB_PASS_PHRASE,
             )
+            import httpx
+            http_client = httpx.Client(proxies={"http://": "http://nkombbpe:2d9a5jydr5vr@64.137.96.74:6641", "https://": "http://nkombbpe:2d9a5jydr5vr@64.137.96.74:6641"})
             self.client = ClobClient(
                 host=Config.CLOB_HOST,
                 chain_id=Config.CHAIN_ID,
@@ -131,6 +133,7 @@ class PolymarketClient:
                 creds=creds,
                 signature_type=SignatureTypeV2.POLY_1271,
                 funder=self.deposit_wallet,
+                http_client=http_client,
             )
             logging.info("Balance allowance guncelleniyor...")
             self.client.update_balance_allowance(
