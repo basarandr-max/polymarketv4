@@ -1,3 +1,5 @@
 flask
 aiohttp
-gunicorn
+python-dotenv
+requests
+py-clob-client-v2
