@@ -88,6 +88,9 @@
   .btn-add:hover   { background: var(--blue-dim); }
   .btn-del    { border-color: var(--red); color: var(--red); font-size: 10px; padding: 5px 10px; }
   .btn-del:hover   { background: var(--red-dim); }
+  .btn-cancel { border-color: var(--yellow); color: var(--yellow); }
+  .btn-cancel:hover { background: #ffd74022; }
+  .btn-cancel:disabled { opacity: .3; cursor: not-allowed; }
   .btn-save   { border-color: var(--accent); color: var(--accent); }
   .btn-save:hover  { background: var(--accent-dim); }
   button:disabled { opacity: .3; cursor: not-allowed; }
@@ -275,6 +278,7 @@
   <div class="controls">
     <button class="btn-start" id="btnStart" onclick="botStart()">▶ Başlat</button>
     <button class="btn-stop"  id="btnStop"  onclick="botStop()" disabled>■ Durdur</button>
+    <button class="btn-cancel" id="btnCancel" onclick="cancelAllOrders()">🚫 Tüm Emirleri İptal Et</button>
   </div>
 
   <!-- STATS -->
@@ -543,6 +547,23 @@ async function botStart() {
 async function botStop() {
   const r = await fetch('/api/stop', {method:'POST'}).then(r=>r.json());
   toast(r.msg, r.ok);
+}
+
+// ── CANCEL ALL ORDERS ──
+async function cancelAllOrders() {
+  if (!confirm('Tüm açık emirler iptal edilsin mi?')) return;
+  const btn = document.getElementById('btnCancel');
+  btn.disabled = true;
+  btn.textContent = '⏳ İptal ediliyor...';
+  try {
+    const r = await fetch('/api/cancel-all', {method:'POST'}).then(r=>r.json());
+    toast(r.msg, r.ok);
+  } catch(e) {
+    toast('Bağlantı hatası', false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚫 Tüm Emirleri İptal Et';
+  }
 }
 
 // ── TRADER ──
