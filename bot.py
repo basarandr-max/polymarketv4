@@ -239,6 +239,35 @@ class PolymarketClient:
             logging.error(f"SELL hatasi: {e}")
             return None
 
+    def cancel_all_orders(self) -> Dict:
+        """Tüm açık BUY emirlerini iptal et"""
+        if Config.TEST_MODE:
+            logging.info("[TEST] Tüm emirler iptal edildi (simülasyon)")
+            return {"cancelled": 0, "test": True}
+        if not self.client:
+            logging.error("CLOB client yok!")
+            return {"error": "CLOB client yok"}
+        try:
+            # Açık emirleri listele
+            open_orders = self.client.get_orders({"status": "LIVE"})
+            if not open_orders:
+                logging.info("İptal edilecek açık emir yok")
+                return {"cancelled": 0}
+            order_ids = []
+            for o in (open_orders if isinstance(open_orders, list) else []):
+                oid = o.get("id") or o.get("order_id")
+                if oid:
+                    order_ids.append(oid)
+            if not order_ids:
+                return {"cancelled": 0}
+            # Toplu iptal
+            result = self.client.cancel_orders(order_ids)
+            logging.info(f"İptal sonucu: {result}")
+            return {"cancelled": len(order_ids), "result": str(result)}
+        except Exception as e:
+            logging.error(f"cancel_all_orders hatasi: {e}")
+            return {"error": str(e)}
+
     def get_real_balance(self) -> Decimal:
         """Polymarket CLOB API'den bakiye çek"""
         if not self.client:
@@ -460,21 +489,21 @@ class UserTracker:
                 self.seen_tx[w].add(tx); continue
             if tx in self.seen_tx[w]: continue
             self.seen_tx[w].add(tx)
-            # Sadece son 3 dakika icindeki islemleri kopyala
+            # Timestamp kontrolu - sadece son 5 dakika
             try:
-                # Farkli timestamp alanlari dene
                 trade_ts = act.get("timestamp") or act.get("createdAt") or act.get("blockTimestamp") or 0
                 if isinstance(trade_ts, str):
                     from datetime import datetime
                     trade_ts = datetime.fromisoformat(trade_ts.replace("Z", "+00:00")).timestamp()
-                if not trade_ts:
-                    logging.warning(f"Timestamp yok, islem atlaniyor: {tx[:10]}")
-                    continue
-                if (now_ts - float(trade_ts)) > 180:
-                    logging.info(f"Eski islem atlandi ({int(now_ts - float(trade_ts))}s): {tx[:10]}...")
+                trade_ts = float(trade_ts)
+                age = now_ts - trade_ts
+                logging.debug(f"Trade yasi: {age:.0f}s - {tx[:10]}")
+                if age > 300 or age < -60:
+                    logging.info(f"Eski/gecersiz islem atlandi ({age:.0f}s): {tx[:10]}...")
                     continue
             except Exception as ts_err:
-                logging.debug(f"Timestamp hatasi: {ts_err}")
+                logging.warning(f"Timestamp hatasi, islem atlaniyor: {ts_err}")
+                continue
             try:
                 size = Decimal(str(act.get("usdcSize", "0")))
             except:
@@ -520,12 +549,25 @@ async def run_bot():
     poly = PolymarketClient()
     app_state["poly_client"] = poly
 
-    # Başlangıçta pozisyonları temizle ve gerçek bakiyeyi çek
-    portfolio.open_positions.clear()
-    app_state["seen_conditions"].clear()
-    logging.info("Pozisyonlar temizlendi, sifirdan basliyor")
+    # Başlangıçta gerçek bakiyeyi çek, pozisyonları TEMIZLEME
+    logging.info("Bot basliyor, mevcut pozisyonlar korunuyor...")
     if not Config.TEST_MODE and poly.client:
         poly.sync_portfolio_balance(portfolio)
+        # Polymarket'ten açık pozisyonları çek ve seen_conditions'a ekle
+        try:
+            import requests
+            url = f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0.01"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                positions = resp.json()
+                logging.info(f"Polymarket'te {len(positions)} acik pozisyon bulundu")
+                for p in positions:
+                    cond_id = p.get("conditionId", "")
+                    if cond_id:
+                        app_state["seen_conditions"].add(cond_id)
+                logging.info(f"seen_conditions guncellendi: {len(app_state['seen_conditions'])} pozisyon")
+        except Exception as e:
+            logging.error(f"Pozisyon senkronizasyon hatasi: {e}")
         open_value = sum(p.size_usd for p in portfolio.open_positions.values())
         portfolio.initial_capital = portfolio.cash + open_value
         logging.info(f"Portföy senkronize: Cash=${portfolio.cash:.2f}, Toplam=${portfolio.initial_capital:.2f}")
@@ -559,8 +601,8 @@ async def run_bot():
                     name       = act.get("tracked_user", "?")
                     title      = str(act.get("title", act.get("question", "Bilinmiyor")))[:60]
                     token_id   = act.get("tokenId", act.get("conditionId", ""))
-                    outcome_i  = act.get("outcomeIndex", 1)
-                    outcome    = "YES" if outcome_i == 1 else "NO"
+                    outcome_i  = act.get("outcomeIndex", 0)
+                    outcome    = "YES" if outcome_i == 0 else "NO"
 
                     try:
                         price = float(act.get("price", 0.5))
@@ -636,9 +678,6 @@ async def run_bot():
                             continue
                         if condition_key:
                             app_state["seen_conditions"].add(condition_key)
-                        # Maksimum 4 açık pozisyon
-                        # Limit yok
-
                         # Gerçek bakiyeyi kontrol et
                         real_cash = poly.get_real_balance() if not Config.TEST_MODE else portfolio.cash
                         if real_cash < Config.MIN_CASH:
@@ -653,8 +692,9 @@ async def run_bot():
                         if direct_token:
                             token_id = direct_token
                             logging.info(f"Direkt asset kullaniliyor: {token_id[:20]}...")
-                        # Her zaman sabit TRADE_SIZE kullan (min 5 dolar)
+                        # Sabit TRADE_SIZE kullan
                         trade_amount = float(Config.TRADE_SIZE)
+                        logging.info(f"Trade boyutu: ${trade_amount:.2f} (sabit TRADE_SIZE)")
                         result = poly.buy(token_id, outcome_i, price, trade_amount)
 
                         if result is not None:
@@ -731,6 +771,33 @@ async def run_bot():
                                 f"Gercek Nakit: ${portfolio.cash:.2f}\n"
                                 f"Win Rate: {wr:.0f}% ({portfolio.winning_trades}W/{portfolio.losing_trades}L)"
                             )
+
+            # STOP-LOSS kontrolu - her taramada
+            if not Config.TEST_MODE and poly.client:
+                async with TelegramNotifier() as sl_notifier:
+                    for pos_id, pos in list(portfolio.open_positions.items()):
+                        try:
+                            import requests
+                            url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
+                            resp = requests.get(url, timeout=5)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                current_price = float(data.get("price", pos.entry_price))
+                                loss_pct = (float(pos.entry_price) - current_price) / float(pos.entry_price) * 100
+                                if loss_pct >= 50:
+                                    logging.info(f"STOP-LOSS: {pos.market_title} %{loss_pct:.0f} zarar, satiliyor...")
+                                    sl_result = poly.sell(pos.token_id, 1, current_price, float(pos.size_usd))
+                                    if sl_result:
+                                        pnl = Decimal(str(current_price - float(pos.entry_price))) * (pos.size_usd / pos.entry_price)
+                                        await sl_notifier.send(
+                                            f"🛑 STOP-LOSS TETIKLENDI\n"
+                                            f"Market: {pos.market_title}\n"
+                                            f"Zarar: %{loss_pct:.0f}\n"
+                                            f"PnL: -${abs(float(pnl)):.2f}"
+                                        )
+                                        del portfolio.open_positions[pos_id]
+                        except Exception as e:
+                            logging.error(f"Stop-loss kontrol hatasi: {e}")
 
             # 20 taramada bir rapor
             if app_state["scan_count"] % 20 == 0:
@@ -870,9 +937,34 @@ def del_trader(wallet):
     save_traders()
     return jsonify({"ok": True, "msg": "Trader silindi"})
 
+@flask_app.route("/api/cancel-all", methods=["POST"])
+def cancel_all():
+    poly = app_state.get("poly_client")
+    if not poly:
+        # Bot çalışmıyorsa geçici client oluştur
+        poly = PolymarketClient()
+    result = poly.cancel_all_orders()
+    if "error" in result:
+        return jsonify({"ok": False, "msg": result["error"]})
+    cancelled = result.get("cancelled", 0)
+    test_suffix = " (TEST)" if result.get("test") else ""
+    msg = f"{cancelled} adet emir iptal edildi{test_suffix}"
+    logging.info(msg)
+    # Telegram bildirimi gönder
+    async def _notify():
+        async with TelegramNotifier() as n:
+            await n.send(f"🚫 TÜM EMİRLER İPTAL EDİLDİ\n{cancelled} emir iptal edildi{test_suffix}")
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_notify())
+        loop.close()
+    except Exception as e:
+        logging.warning(f"Telegram bildirim hatasi: {e}")
+    return jsonify({"ok": True, "msg": msg, "cancelled": cancelled})
+
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s | %(levelname)s | %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)]
     )
@@ -891,4 +983,3 @@ if __name__ == "__main__":
         t.start()
     port = int(os.environ.get("PORT", 5000))
     flask_app.run(host="0.0.0.0", port=port, debug=False)
-
