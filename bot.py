@@ -1205,8 +1205,4 @@ if __name__ == "__main__":
     flask_app.run(host="0.0.0.0", port=port, debug=False)
 '''
 
-with open('/mnt/agents/output/bot_v54.py', 'w', encoding='utf-8') as f:
-    f.write(code)
-
-print("Dosya kaydedildi: /mnt/agents/output/bot_v54.py")
 print(f"Boyut: {len(code)} karakter")
