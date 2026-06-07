@@ -509,11 +509,7 @@ class TelegramNotifier:
         self.session = None
 
     async def __aenter__(self):
-        import ssl
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+        connector = aiohttp.TCPConnector(ssl=True)
         self.session = aiohttp.ClientSession(connector=connector)
         return self
     async def __aexit__(self, *_):
@@ -527,9 +523,10 @@ class TelegramNotifier:
         try:
             async with self.session.post(url, json={
                 "chat_id": self.chat_id,
-                "text": msg,
-                "parse_mode": "Markdown"
-            }, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                "text": msg[:4096],
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True
+            }, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 200:
                     logging.info("Telegram mesaji gonderildi!")
                 else:
@@ -628,6 +625,45 @@ async def sync_open_positions_from_ui(poly, portfolio):
     except Exception as e:
         logging.error(f"Pozisyon senkronizasyon hatasi: {e}")
 
+
+async def check_closed_positions(portfolio, notifier):
+    """Her taramada pozisyonları kontrol et - kapananları kapat"""
+    import requests as req
+    if not portfolio.open_positions:
+        return
+    closed = []
+    for pos_id, pos in list(portfolio.open_positions.items()):
+        try:
+            url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
+            resp = req.get(url, timeout=5)
+            if resp.status_code != 200:
+                continue
+            current_price = float(resp.json().get("price", 0))
+            if current_price >= 0.99:
+                pnl = pos.size_usd / pos.entry_price * (Decimal("0.99") - pos.entry_price)
+                portfolio.cash += pos.size_usd + pnl
+                portfolio.realized_pnl += pnl
+                portfolio.winning_trades += 1
+                closed.append((pos.market_title, float(pnl), "KAZANDI ✅"))
+                del portfolio.open_positions[pos_id]
+                logging.info(f"Pozisyon kapandi KAZANDI: {pos.market_title} PnL: +${float(pnl):.2f}")
+            elif current_price <= 0.01:
+                pnl = pos.size_usd / pos.entry_price * (Decimal("0.01") - pos.entry_price)
+                portfolio.cash += max(Decimal("0"), pos.size_usd + pnl)
+                portfolio.realized_pnl += pnl
+                portfolio.losing_trades += 1
+                closed.append((pos.market_title, float(pnl), "KAYBETTI ❌"))
+                del portfolio.open_positions[pos_id]
+                logging.info(f"Pozisyon kapandi KAYBETTI: {pos.market_title} PnL: ${float(pnl):.2f}")
+        except Exception as e:
+            logging.error(f"Pozisyon kontrol hatasi ({pos_id}): {e}")
+    if closed:
+        save_portfolio(portfolio)
+        msg = "📊 POZİSYONLAR KAPANDI\n"
+        for title, pnl, result in closed:
+            sign = "+" if pnl >= 0 else ""
+            msg += f"{result}: {title[:35]} ({sign}${pnl:.2f})\n"
+        await notifier.send(msg)
 
 async def run_bot():
     app_state["running"] = True
@@ -737,6 +773,13 @@ async def run_bot():
                     logging.info(f"Trade #{i}: user={t.get('tracked_user','?')} side={t.get('side','?')} title={t.get('title','?')} tx={t.get('transactionHash','?')[:15]}")
 
             async with TelegramNotifier() as notifier:
+                # Her taramada pozisyonları kontrol et
+                await check_closed_positions(portfolio, notifier)
+
+                # Gerçek modda bakiye senkronize et (her 10 taramada)
+                if app_state["scan_count"] % 10 == 0 and not Config.TEST_MODE and poly.client:
+                    poly.sync_portfolio_balance(portfolio)
+
                 for act in trades:
                     side       = act.get("side", "").upper()
                     name       = act.get("tracked_user", "?")
