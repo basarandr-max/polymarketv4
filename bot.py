@@ -56,12 +56,13 @@ class Config:
         "0x1fad72fae204143ff1c3035e99e7c0f65ea8d5cd9bd1070987bd1a3316f772be",
     ]
     TRACKED_USERS: List[Dict] = [
-        {"name": "Oddn",              "wallet": "0xa53c26443fb636d8ae31ac24f62fc1d5ef8f67a5"},
         {"name": "Swisstony",         "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
-        {"name": "LaBradfordSmith22", "wallet": "0x9495425feeb0c250accb89275c97587011b19a27"},
-        {"name": "Mosley1",           "wallet": "0x5bec79df9add70a3892041ab1a5516b60f53b215"},
-        {"name": "wan123",            "wallet": "0xde7be6d489bce070a959e0cb813128ae659b5f4b"},
-        {"name": "Tiger200",          "wallet": "0x6211f97a76ed5c4b1d658f637041ac5f293db89e"},
+        {"name": "afghj2421",           "wallet": "0xb91aeb5accc33a5f9a8615b8ed6b2d352e913987"},
+        {"name": "ferrariChampions2026","wallet": "0xfe787d2da716d60e8acff57fb87eb13cd4d10319"},
+        {"name": "Countryside",         "wallet": "0xbddf61af533ff524d27154e589d2d7a81510c684"},
+        {"name": "HomeRunHazard",       "wallet": "0x5268527977f700f9bf9b6d5cd843859e4e70135d"},
+        {"name": "RN1",                 "wallet": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea"},
+        {"name": "Vatrer",              "wallet": "0x72d815133f9f8b6529e911cf3be492846ce05213"},
     ]
 
 # ==================== POLYMARKET CLIENT ====================
@@ -958,32 +959,43 @@ async def run_bot():
                                 f"Win Rate: {wr:.0f}% ({portfolio.winning_trades}W/{portfolio.losing_trades}L)"
                             )
 
-            # STOP-LOSS kontrolu - her taramada
-            if not Config.TEST_MODE and poly.client:
-                async with TelegramNotifier() as sl_notifier:
-                    for pos_id, pos in list(portfolio.open_positions.items()):
-                        try:
-                            import requests
-                            url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
-                            resp = requests.get(url, timeout=5)
-                            if resp.status_code == 200:
-                                data = resp.json()
-                                current_price = float(data.get("price", pos.entry_price))
-                                loss_pct = (float(pos.entry_price) - current_price) / float(pos.entry_price) * 100
-                                if loss_pct >= 50:
-                                    logging.info(f"STOP-LOSS: {pos.market_title} %{loss_pct:.0f} zarar, satiliyor...")
+            # STOP-LOSS kontrolu - her taramada (test ve gercek modda)
+            async with TelegramNotifier() as sl_notifier:
+                for pos_id, pos in list(portfolio.open_positions.items()):
+                    try:
+                        import requests
+                        url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
+                        resp = requests.get(url, timeout=5)
+                        if resp.status_code == 200:
+                            current_price = float(resp.json().get("price", pos.entry_price))
+                            loss_pct = (float(pos.entry_price) - current_price) / float(pos.entry_price) * 100
+                            if loss_pct >= 50:
+                                logging.info(f"STOP-LOSS: {pos.market_title} %{loss_pct:.0f} zarar")
+                                pnl = Decimal(str(current_price)) * (pos.size_usd / pos.entry_price) - pos.size_usd
+                                if Config.TEST_MODE:
+                                    # Test modunda simüle et
+                                    portfolio.cash += pos.size_usd + pnl
+                                    portfolio.realized_pnl += pnl
+                                    portfolio.losing_trades += 1
+                                    del portfolio.open_positions[pos_id]
+                                    save_portfolio(portfolio)
+                                else:
+                                    # Gerçek modda sat
                                     sl_result = poly.sell(pos.token_id, 1, current_price, float(pos.size_usd))
                                     if sl_result:
-                                        pnl = Decimal(str(current_price - float(pos.entry_price))) * (pos.size_usd / pos.entry_price)
-                                        await sl_notifier.send(
-                                            f"🛑 STOP-LOSS TETIKLENDI\n"
-                                            f"Market: {pos.market_title}\n"
-                                            f"Zarar: %{loss_pct:.0f}\n"
-                                            f"PnL: -${abs(float(pnl)):.2f}"
-                                        )
+                                        portfolio.cash += pos.size_usd + pnl
+                                        portfolio.realized_pnl += pnl
+                                        portfolio.losing_trades += 1
                                         del portfolio.open_positions[pos_id]
-                        except Exception as e:
-                            logging.error(f"Stop-loss kontrol hatasi: {e}")
+                                        save_portfolio(portfolio)
+                                await sl_notifier.send(
+                                    f"🛑 STOP-LOSS TETIKLENDI\n"
+                                    f"Market: {pos.market_title}\n"
+                                    f"Zarar: %{loss_pct:.0f}\n"
+                                    f"PnL: -${abs(float(pnl)):.2f}"
+                                )
+                    except Exception as e:
+                        logging.error(f"Stop-loss kontrol hatasi: {e}")
 
             # 20 taramada bir rapor
             # seen_tx kaydet (her 5 taramada bir)
