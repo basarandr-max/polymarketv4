@@ -1084,6 +1084,37 @@ def del_trader(wallet):
     save_traders()
     return jsonify({"ok": True, "msg": "Trader silindi"})
 
+@flask_app.route("/api/close-all", methods=["POST"])
+def close_all_positions():
+    portfolio = app_state["portfolio"]
+    if not portfolio.open_positions:
+        return jsonify({"ok": False, "msg": "Açık pozisyon yok"})
+    count = len(portfolio.open_positions)
+    # Her pozisyonu kapat - anlık fiyatla simüle et
+    import requests as req
+    for pos_id, pos in list(portfolio.open_positions.items()):
+        try:
+            url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
+            resp = req.get(url, timeout=5)
+            if resp.status_code == 200:
+                current_price = float(resp.json().get("price", float(pos.entry_price)))
+            else:
+                current_price = float(pos.entry_price)
+        except:
+            current_price = float(pos.entry_price)
+        pnl = pos.size_usd / pos.entry_price * (Decimal(str(current_price)) - pos.entry_price)
+        portfolio.cash += pos.size_usd + pnl
+        portfolio.realized_pnl += pnl
+        if pnl >= 0:
+            portfolio.winning_trades += 1
+        else:
+            portfolio.losing_trades += 1
+        del portfolio.open_positions[pos_id]
+    save_portfolio(portfolio)
+    msg = f"{count} pozisyon kapatıldı"
+    logging.info(msg)
+    return jsonify({"ok": True, "msg": msg, "count": count})
+
 @flask_app.route("/api/cancel-all", methods=["POST"])
 def cancel_all():
     poly = app_state.get("poly_client")
