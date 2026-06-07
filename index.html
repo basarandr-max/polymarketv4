@@ -90,6 +90,8 @@
   .btn-del:hover   { background: var(--red-dim); }
   .btn-cancel { border-color: var(--yellow); color: var(--yellow); }
   .btn-cancel:hover { background: #ffd74022; }
+  .btn-closeall { border-color: #ff4444; color: #ff4444; }
+  .btn-closeall:hover { background: #ff444422; }
   .btn-cancel:disabled { opacity: .3; cursor: not-allowed; }
   .btn-save   { border-color: var(--accent); color: var(--accent); }
   .btn-save:hover  { background: var(--accent-dim); }
@@ -279,6 +281,7 @@
     <button class="btn-start" id="btnStart" onclick="botStart()">▶ Başlat</button>
     <button class="btn-stop"  id="btnStop"  onclick="botStop()" disabled>■ Durdur</button>
     <button class="btn-cancel" id="btnCancel" onclick="cancelAllOrders()">🚫 Tüm Emirleri İptal Et</button>
+    <button class="btn-closeall" id="btnCloseAll" onclick="closeAllPositions()">❌ Tüm Pozisyonları Kapat</button>
   </div>
 
   <!-- STATS -->
@@ -609,6 +612,23 @@ async function saveConfig() {
 function startRefresh() {
   clearInterval(refreshTimer);
   refreshTimer = setInterval(refresh, 4000);
+}
+
+async function closeAllPositions() {
+  if (!confirm('Tüm açık pozisyonlar kapatılsın mı?')) return;
+  const btn = document.getElementById('btnCloseAll');
+  btn.disabled = true;
+  btn.textContent = '⏳ Kapatılıyor...';
+  try {
+    const r = await fetch('/api/close-all', {method:'POST'}).then(r=>r.json());
+    toast(r.msg, r.ok);
+    refresh();
+  } catch(e) {
+    toast('Bağlantı hatası', false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '❌ Tüm Pozisyonları Kapat';
+  }
 }
 
 // INIT
