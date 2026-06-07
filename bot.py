@@ -872,11 +872,36 @@ async def run_bot():
                             continue
                         app_state["no_cash_notified"] = False
 
-                        # Direkt asset ID kullan (conditionId yerine)
-                        direct_token = act.get("asset", "")
-                        if direct_token:
-                            token_id = direct_token
-                            logging.info(f"Direkt asset kullaniliyor: {token_id[:20]}...")
+                        # outcomeIndex'e gore dogru token'i bul
+                        condition_id = act.get("conditionId", "")
+                        direct_asset = act.get("asset", "")
+                        if condition_id:
+                            try:
+                                import requests as req_gamma
+                                g = req_gamma.get(f"https://gamma-api.polymarket.com/markets?conditionId={condition_id}", timeout=5)
+                                if g.status_code == 200 and g.json():
+                                    import json
+                                    mkt = g.json()[0] if isinstance(g.json(), list) else g.json()
+                                    clob_ids = mkt.get("clobTokenIds", "[]")
+                                    if isinstance(clob_ids, str):
+                                        clob_ids = json.loads(clob_ids)
+                                    if len(clob_ids) > outcome_i:
+                                        token_id = clob_ids[outcome_i]
+                                        logging.info(f"Gamma token kullaniliyor: outcome={outcome_i} ({outcome}) token={token_id[:20]}...")
+                                    elif direct_asset:
+                                        token_id = direct_asset
+                                        logging.info(f"Gamma basarisiz, asset kullaniliyor: {token_id[:20]}...")
+                                else:
+                                    if direct_asset:
+                                        token_id = direct_asset
+                                    logging.info(f"Gamma API hatasi, asset kullaniliyor: {token_id[:20]}...")
+                            except Exception as gamma_err:
+                                if direct_asset:
+                                    token_id = direct_asset
+                                logging.warning(f"Gamma token hatasi: {gamma_err}, asset kullaniliyor")
+                        elif direct_asset:
+                            token_id = direct_asset
+                            logging.info(f"conditionId yok, asset kullaniliyor: {token_id[:20]}...")
                         # Sabit TRADE_SIZE kullan
                         trade_amount = float(Config.TRADE_SIZE)
                         logging.info(f"Trade boyutu: ${trade_amount:.2f} (sabit TRADE_SIZE)")
