@@ -361,6 +361,28 @@ class Position:
         }
 
 PORTFOLIO_FILE = "portfolio_state.json"
+SEEN_TX_FILE = "seen_tx.json"
+
+def save_seen_tx(seen_tx):
+    try:
+        import json
+        data = {w: list(txs) for w, txs in seen_tx.items()}
+        with open(SEEN_TX_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        logging.error(f"seen_tx kayit hatasi: {e}")
+
+def load_seen_tx():
+    try:
+        import json
+        if not os.path.exists(SEEN_TX_FILE):
+            return {}
+        with open(SEEN_TX_FILE) as f:
+            data = json.load(f)
+        return {w: set(txs) for w, txs in data.items()}
+    except Exception as e:
+        logging.error(f"seen_tx yukle hatasi: {e}")
+        return {}
 
 def save_portfolio(portfolio):
     try:
@@ -521,7 +543,11 @@ class UserTracker:
         self.users       = users
         self.session     = None
         self.last_req    = 0
-        self.seen_tx     = {u["wallet"]: set() for u in users}
+        saved_tx = load_seen_tx()
+        self.seen_tx = {u["wallet"]: saved_tx.get(u["wallet"], set()) for u in users}
+        if saved_tx:
+            total = sum(len(v) for v in self.seen_tx.values())
+            logging.info(f"seen_tx yuklendi: {total} tx")
         self.initialized = {u["wallet"]: False for u in users}
 
     async def _get(self, url):
@@ -616,11 +642,53 @@ async def run_bot():
             # Seen conditions guncelle
             for pos_id in saved.open_positions:
                 app_state["seen_conditions"].add(pos_id)
-            logging.info(f"Test portfolio yuklendi: {len(saved.open_positions)} pozisyon")
+            logging.info(f"Test portfolio yuklendi: {len(saved.open_positions)} pozisyon, Nakit: ${saved.cash:.2f}")
         else:
             logging.info("Yeni test portfolio olusturuluyor")
+            app_state["portfolio"].cash = Config.INITIAL_CAPITAL
+            app_state["portfolio"].initial_capital = Config.INITIAL_CAPITAL
 
     portfolio = app_state["portfolio"]
+
+    # Test modunda acik pozisyonlari kontrol et - kapananları kapat
+    if Config.TEST_MODE and portfolio.open_positions:
+        import requests
+        logging.info(f"Acik pozisyonlar kontrol ediliyor: {len(portfolio.open_positions)} adet")
+        closed = []
+        for pos_id, pos in list(portfolio.open_positions.items()):
+            try:
+                # Market sonucunu kontrol et
+                url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
+                resp = requests.get(url, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    current_price = float(data.get("price", 0))
+                    # Fiyat 0.99+ ise kazandı, 0.01- ise kaybetti - market kapandı
+                    if current_price >= 0.99:
+                        pnl = pos.size_usd / pos.entry_price * (Decimal("0.99") - pos.entry_price)
+                        portfolio.cash += pos.size_usd + pnl
+                        portfolio.realized_pnl += pnl
+                        portfolio.winning_trades += 1
+                        closed.append((pos.market_title, float(pnl), "KAZANDI"))
+                        del portfolio.open_positions[pos_id]
+                        logging.info(f"Pozisyon kapandi (KAZANDI): {pos.market_title} PnL: +${float(pnl):.2f}")
+                    elif current_price <= 0.01:
+                        pnl = pos.size_usd / pos.entry_price * (Decimal("0.01") - pos.entry_price)
+                        portfolio.cash += max(Decimal("0"), pos.size_usd + pnl)
+                        portfolio.realized_pnl += pnl
+                        portfolio.losing_trades += 1
+                        closed.append((pos.market_title, float(pnl), "KAYBETTI"))
+                        del portfolio.open_positions[pos_id]
+                        logging.info(f"Pozisyon kapandi (KAYBETTI): {pos.market_title} PnL: ${float(pnl):.2f}")
+            except Exception as e:
+                logging.error(f"Pozisyon kontrol hatasi: {e}")
+        if closed:
+            save_portfolio(portfolio)
+            msg = "POZISYONLAR KAPANDI\n"
+            for title, pnl, result in closed:
+                sign = "+" if pnl >= 0 else ""
+                msg += f"{result}: {title[:30]} ({sign}${pnl:.2f})\n"
+            logging.info(msg)
 
     # Başlangıçta gerçek bakiyeyi çek, pozisyonları TEMIZLEME
     logging.info("Bot basliyor, mevcut pozisyonlar korunuyor...")
@@ -875,6 +943,10 @@ async def run_bot():
                             logging.error(f"Stop-loss kontrol hatasi: {e}")
 
             # 20 taramada bir rapor
+            # seen_tx kaydet (her 5 taramada bir)
+            if app_state["scan_count"] % 5 == 0:
+                save_seen_tx(tracker.seen_tx)
+
             if app_state["scan_count"] % 20 == 0:
                 async with TelegramNotifier() as notifier:
                     sign = "+" if portfolio.total_pnl >= 0 else ""
