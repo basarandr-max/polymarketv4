@@ -1173,7 +1173,7 @@ def cancel_all():
     logging.info(msg)
     async def _notify():
         async with TelegramNotifier() as n:
-            await n.send(f"🚫 TÜM EMİRLER İPTAL EDİLDİ\\n{cancelled} emir iptal edildi{test_suffix}")
+            await n.send(f"🚫 TÜM EMİRLER İPTAL EDİLDİ\n{cancelled} emir iptal edildi{test_suffix}")
     try:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(_notify())
@@ -1189,7 +1189,7 @@ if __name__ == "__main__":
         handlers=[logging.StreamHandler(sys.stdout)]
     )
     print("=" * 50)
-    print("  POLYMARKET BOT v5.4")
+    print("  POLYMARKET BOT v5.3")
     print(f"  EOA Address: {'OK' if Config.EOA_ADDRESS else 'EKSIK'}")
     print(f"  Deposit Wallet: {'OK' if Config.DEPOSIT_WALLET else 'AUTO/Otomatik'}")
     print(f"  Private Key: {'OK' if Config.PRIVATE_KEY else 'EKSIK'}")
@@ -1203,6 +1203,3 @@ if __name__ == "__main__":
         t.start()
     port = int(os.environ.get("PORT", 5000))
     flask_app.run(host="0.0.0.0", port=port, debug=False)
-'''
-
-print(f"Boyut: {len(code)} karakter")
