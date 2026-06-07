@@ -774,8 +774,9 @@ async def run_bot():
                     logging.info(f"Trade #{i}: user={t.get('tracked_user','?')} side={t.get('side','?')} title={t.get('title','?')} tx={t.get('transactionHash','?')[:15]}")
 
             async with TelegramNotifier() as notifier:
-                # Her taramada pozisyonları kontrol et
-                await check_closed_positions(portfolio, notifier)
+                # Her 3 taramada bir pozisyonları kontrol et (API yükü azalt)
+                if app_state["scan_count"] % 3 == 0:
+                    await check_closed_positions(portfolio, notifier)
 
                 # Gerçek modda bakiye senkronize et (her 10 taramada)
                 if app_state["scan_count"] % 10 == 0 and not Config.TEST_MODE and poly.client:
@@ -984,8 +985,9 @@ async def run_bot():
                                 f"Win Rate: {wr:.0f}% ({portfolio.winning_trades}W/{portfolio.losing_trades}L)"
                             )
 
-            # STOP-LOSS kontrolu - her taramada (test ve gercek modda)
-            async with TelegramNotifier() as sl_notifier:
+            # STOP-LOSS kontrolu - her 5 taramada bir
+            if app_state["scan_count"] % 5 == 0:
+             async with TelegramNotifier() as sl_notifier:
                 for pos_id, pos in list(portfolio.open_positions.items()):
                     try:
                         import requests
