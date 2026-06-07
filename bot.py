@@ -360,6 +360,66 @@ class Position:
             "opened_at":    self.opened_at.strftime("%H:%M %d/%m"),
         }
 
+PORTFOLIO_FILE = "portfolio_state.json"
+
+def save_portfolio(portfolio):
+    try:
+        import json
+        state = {
+            "cash": float(portfolio.cash),
+            "initial_capital": float(portfolio.initial_capital),
+            "realized_pnl": float(portfolio.realized_pnl),
+            "total_trades": portfolio.total_trades,
+            "winning_trades": portfolio.winning_trades,
+            "losing_trades": portfolio.losing_trades,
+            "open_positions": {k: {
+                "position_id": v.position_id,
+                "trader_name": v.trader_name,
+                "market_title": v.market_title,
+                "token_id": v.token_id,
+                "side": v.side,
+                "entry_price": float(v.entry_price),
+                "size_usd": float(v.size_usd),
+                "opened_at": v.opened_at.strftime("%Y-%m-%d %H:%M:%S"),
+            } for k, v in portfolio.open_positions.items()}
+        }
+        with open(PORTFOLIO_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception as e:
+        logging.error(f"Portfolio kayit hatasi: {e}")
+
+def load_portfolio():
+    try:
+        import json
+        if not os.path.exists(PORTFOLIO_FILE):
+            return None
+        with open(PORTFOLIO_FILE) as f:
+            state = json.load(f)
+        p = Portfolio()
+        p.cash = Decimal(str(state["cash"]))
+        p.initial_capital = Decimal(str(state["initial_capital"]))
+        p.realized_pnl = Decimal(str(state["realized_pnl"]))
+        p.total_trades = state["total_trades"]
+        p.winning_trades = state["winning_trades"]
+        p.losing_trades = state["losing_trades"]
+        for k, v in state["open_positions"].items():
+            pos = Position(
+                position_id=v["position_id"],
+                trader_name=v["trader_name"],
+                market_title=v["market_title"],
+                token_id=v["token_id"],
+                side=v["side"],
+                entry_price=Decimal(str(v["entry_price"])),
+                size_usd=Decimal(str(v["size_usd"])),
+                opened_at=datetime.strptime(v["opened_at"], "%Y-%m-%d %H:%M:%S"),
+            )
+            p.open_positions[k] = pos
+        logging.info(f"Portfolio yuklendi: {len(p.open_positions)} pozisyon, Nakit: ${p.cash:.2f}")
+        return p
+    except Exception as e:
+        logging.error(f"Portfolio yukle hatasi: {e}")
+        return None
+
 @dataclass
 class Portfolio:
     initial_capital: Decimal = field(default_factory=lambda: Decimal(os.environ.get("INITIAL_CAPITAL", "23")))
@@ -545,9 +605,22 @@ async def sync_open_positions_from_ui(poly, portfolio):
 
 async def run_bot():
     app_state["running"] = True
-    portfolio = app_state["portfolio"]
     poly = PolymarketClient()
     app_state["poly_client"] = poly
+
+    # Test modunda portfolio dosyadan yukle
+    if Config.TEST_MODE:
+        saved = load_portfolio()
+        if saved:
+            app_state["portfolio"] = saved
+            # Seen conditions guncelle
+            for pos_id in saved.open_positions:
+                app_state["seen_conditions"].add(pos_id)
+            logging.info(f"Test portfolio yuklendi: {len(saved.open_positions)} pozisyon")
+        else:
+            logging.info("Yeni test portfolio olusturuluyor")
+
+    portfolio = app_state["portfolio"]
 
     # Başlangıçta gerçek bakiyeyi çek, pozisyonları TEMIZLEME
     logging.info("Bot basliyor, mevcut pozisyonlar korunuyor...")
@@ -715,6 +788,7 @@ async def run_bot():
                                 portfolio.cash = poly.get_real_balance()
                             else:
                                 portfolio.cash -= Config.TRADE_SIZE
+                                save_portfolio(portfolio)  # Test modunda kaydet
 
                             sign = "+" if portfolio.total_pnl >= 0 else ""
                             await notifier.send(
@@ -760,6 +834,7 @@ async def run_bot():
                                 portfolio.cash = poly.get_real_balance()
                             else:
                                 portfolio.cash += pos.size_usd + pnl
+                                save_portfolio(portfolio)  # Test modunda kaydet
 
                             ts = "+" if pnl >= 0 else ""
                             wr = (portfolio.winning_trades / portfolio.total_trades * 100) if portfolio.total_trades > 0 else 0
