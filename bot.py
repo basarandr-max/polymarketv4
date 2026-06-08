@@ -700,14 +700,23 @@ async def check_closed_positions(portfolio, notifier):
     import requests as req
     if not portfolio.open_positions:
         return
+    # Benzersiz token_id'leri topla - tekrar sorgu yapma
+    checked_tokens = {}
     closed = []
     for pos_id, pos in list(portfolio.open_positions.items()):
         try:
-            url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
-            resp = req.get(url, timeout=5)
-            if resp.status_code != 200:
+            if not pos.token_id:
                 continue
-            current_price = float(resp.json().get("price", 0))
+            # Aynı token'ı birden fazla sorgulama
+            if pos.token_id in checked_tokens:
+                current_price = checked_tokens[pos.token_id]
+            else:
+                url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
+                resp = req.get(url, timeout=5)
+                if resp.status_code != 200:
+                    continue
+                current_price = float(resp.json().get("price", 0))
+                checked_tokens[pos.token_id] = current_price
             if current_price >= 0.99:
                 pnl = pos.size_usd / pos.entry_price * (Decimal("0.99") - pos.entry_price)
                 portfolio.cash += pos.size_usd + pnl
@@ -819,14 +828,25 @@ async def run_bot():
         logging.info(f"Portföy senkronize: Cash=${portfolio.cash:.2f}, Toplam=${portfolio.initial_capital:.2f}")
 
     mod = "TEST" if Config.TEST_MODE else "GERCEK"
+    portfolio = app_state["portfolio"]
+    acik = len(portfolio.open_positions)
+    nakit = float(portfolio.cash)
+    toplam = float(portfolio.cash) + sum(float(p.size_usd) for p in portfolio.open_positions.values())
+    pnl = float(portfolio.realized_pnl)
+    sign = "+" if pnl >= 0 else ""
     async with TelegramNotifier() as notifier:
         await notifier.send(
-            f"BOT v5.2 BASLADI\n"
+            f"🤖 BOT BAŞLADI\n"
             f"Mod: *{mod}*\n"
-            f"Trade boyutu: ${Config.TRADE_SIZE}\n"
-            f"Trader sayisi: {len(app_state['tracked_users'])}\n"
-            f"Cuzdan: `{Config.DEPOSIT_WALLET or Config.EOA_ADDRESS[:10]}...`"
+            f"━━━━━━━━━━━━━━\n"
+            f"💰 Nakit: ${nakit:.2f}\n"
+            f"📊 Toplam: ${toplam:.2f}\n"
+            f"📈 PnL: {sign}${pnl:.2f}\n"
+            f"📌 Açık Pozisyon: {acik} adet\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"👥 Takip: {len(app_state['tracked_users'])} trader"
         )
+    logging.info(f"Bot basliyor - Mod: {mod}, Trader: {len(app_state['tracked_users'])}")
 
     tracker = UserTracker(list(app_state["tracked_users"]))
 
@@ -1056,11 +1076,23 @@ async def run_bot():
             # STOP-LOSS kontrolu - her 5 taramada bir
             if app_state["scan_count"] % 5 == 0:
              async with TelegramNotifier() as sl_notifier:
+                sl_checked = {}
                 for pos_id, pos in list(portfolio.open_positions.items()):
                     try:
                         import requests
-                        url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
-                        resp = requests.get(url, timeout=5)
+                        if not pos.token_id:
+                            continue
+                        if pos.token_id in sl_checked:
+                            resp_data = sl_checked[pos.token_id]
+                            class FakeResp:
+                                status_code = 200
+                                def json(self): return resp_data
+                            resp = FakeResp()
+                        else:
+                            url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
+                            resp = requests.get(url, timeout=5)
+                            if resp.status_code == 200:
+                                sl_checked[pos.token_id] = resp.json()
                         if resp.status_code == 200:
                             current_price = float(resp.json().get("price", pos.entry_price))
                             loss_pct = (float(pos.entry_price) - current_price) / float(pos.entry_price) * 100
@@ -1292,7 +1324,7 @@ def cancel_all():
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)]
     )
@@ -1306,8 +1338,8 @@ if __name__ == "__main__":
     print(f"  Telegram: {'OK' if Config.TELEGRAM_TOKEN else 'EKSIK'}")
     print(f"  Mod: {'TEST' if Config.TEST_MODE else 'GERCEK'}")
     print("=" * 50)
-    if os.environ.get("RAILWAY_ENVIRONMENT"):
-        t = threading.Thread(target=start_bot_thread, daemon=True)
-        t.start()
+    # Bot thread her zaman başlasın
+    t = threading.Thread(target=start_bot_thread, daemon=True)
+    t.start()
     port = int(os.environ.get("PORT", 5000))
-    flask_app.run(host="0.0.0.0", port=port, debug=False)
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False, threaded=True)
