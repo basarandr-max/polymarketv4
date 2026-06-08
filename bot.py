@@ -960,36 +960,46 @@ async def run_bot():
                             continue
                         app_state["no_cash_notified"] = False
 
-                        # outcomeIndex'e gore dogru token'i bul
+                        # CLOB API'den doğrudan token bul
                         condition_id = act.get("conditionId", "")
                         direct_asset = act.get("asset", "")
+                        token_id = direct_asset  # default
+                        
                         if condition_id:
                             try:
-                                import requests as req_gamma
-                                g = req_gamma.get(f"https://gamma-api.polymarket.com/markets?conditionId={condition_id}", timeout=5)
-                                if g.status_code == 200 and g.json():
-                                    import json
-                                    mkt = g.json()[0] if isinstance(g.json(), list) else g.json()
-                                    clob_ids = mkt.get("clobTokenIds", "[]")
-                                    if isinstance(clob_ids, str):
-                                        clob_ids = json.loads(clob_ids)
-                                    if len(clob_ids) > outcome_i:
-                                        token_id = clob_ids[outcome_i]
-                                        logging.info(f"Gamma token kullaniliyor: outcome={outcome_i} ({outcome}) token={token_id[:20]}...")
-                                    elif direct_asset:
-                                        token_id = direct_asset
-                                        logging.info(f"Gamma basarisiz, asset kullaniliyor: {token_id[:20]}...")
+                                import requests as req_clob
+                                # CLOB API'den market token'larını çek
+                                clob_r = req_clob.get(
+                                    f"https://clob.polymarket.com/markets/{condition_id}",
+                                    timeout=5
+                                )
+                                if clob_r.status_code == 200:
+                                    clob_data = clob_r.json()
+                                    tokens = clob_data.get("tokens", [])
+                                    if len(tokens) > outcome_i:
+                                        token_id = tokens[outcome_i].get("token_id", direct_asset)
+                                        logging.info(f"CLOB token: outcome={outcome_i} ({outcome}) token={token_id[:20]}...")
+                                    else:
+                                        logging.warning(f"CLOB token bulunamadi, asset kullaniliyor")
                                 else:
-                                    if direct_asset:
-                                        token_id = direct_asset
-                                    logging.info(f"Gamma API hatasi, asset kullaniliyor: {token_id[:20]}...")
-                            except Exception as gamma_err:
-                                if direct_asset:
-                                    token_id = direct_asset
-                                logging.warning(f"Gamma token hatasi: {gamma_err}, asset kullaniliyor")
-                        elif direct_asset:
-                            token_id = direct_asset
-                            logging.info(f"conditionId yok, asset kullaniliyor: {token_id[:20]}...")
+                                    # CLOB de başarısız - Gamma dene
+                                    import json as json_mod
+                                    g = req_clob.get(
+                                        f"https://gamma-api.polymarket.com/markets?conditionId={condition_id}",
+                                        timeout=5
+                                    )
+                                    if g.status_code == 200 and g.json():
+                                        mkt = g.json()[0] if isinstance(g.json(), list) else g.json()
+                                        clob_ids = mkt.get("clobTokenIds", "[]")
+                                        if isinstance(clob_ids, str):
+                                            clob_ids = json_mod.loads(clob_ids)
+                                        if len(clob_ids) > outcome_i:
+                                            token_id = clob_ids[outcome_i]
+                                            logging.info(f"Gamma token: outcome={outcome_i} ({outcome}) token={token_id[:20]}...")
+                            except Exception as token_err:
+                                logging.warning(f"Token hatasi: {token_err}, asset kullaniliyor")
+                        
+                        logging.info(f"Final token: {token_id[:20] if token_id else 'YOK'}... outcome={outcome_i} ({outcome})")
                         # Sabit TRADE_SIZE kullan
                         trade_amount = float(Config.TRADE_SIZE)
                         logging.info(f"Trade boyutu: ${trade_amount:.2f} (sabit TRADE_SIZE)")
@@ -1157,7 +1167,7 @@ async def run_bot():
                         f"📌 Açık: {len(portfolio.open_positions)} | Trade: {portfolio.total_trades}\n"
                         + (("━━━━━━━━━━━━━━\n" + "\n".join(
                             f"{'✅' if pos.side=='YES' else '🔴'} {pos.market_title[:35]} ({pos.side}) ${float(pos.size_usd):.0f}"
-                            for pos in list(portfolio.open_positions.values())[:10]
+                            for pos in list(portfolio.open_positions.values())[:20]
                         )) if portfolio.open_positions else "")
                     )
 
