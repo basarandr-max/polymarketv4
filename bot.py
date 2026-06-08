@@ -1154,7 +1154,11 @@ async def run_bot():
                         f"📦 Pozisyon Değeri: ${live_value:.2f}\n"
                         f"📊 Toplam: ${live_total:.2f}\n"
                         f"📈 PnL: {sign}${live_pnl:.2f} ({sign}{float(live_pnl/portfolio.initial_capital*100):.1f}%)\n"
-                        f"📌 Açık: {len(portfolio.open_positions)} | Trade: {portfolio.total_trades}"
+                        f"📌 Açık: {len(portfolio.open_positions)} | Trade: {portfolio.total_trades}\n"
+                        + (("━━━━━━━━━━━━━━\n" + "\n".join(
+                            f"{'✅' if pos.side=='YES' else '🔴'} {pos.market_title[:35]} ({pos.side}) ${float(pos.size_usd):.0f}"
+                            for pos in list(portfolio.open_positions.values())[:10]
+                        )) if portfolio.open_positions else "")
                     )
 
         except Exception as e:
