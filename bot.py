@@ -409,8 +409,7 @@ def save_seen_tx(seen_tx):
         json_str = json.dumps(data)
         with open(SEEN_TX_FILE, "w") as f:
             f.write(json_str)
-        # Railway Variables'a da kaydet
-        save_state_to_env("SEEN_TX_STATE", json_str)
+        # Railway Variables boyut siniri nedeniyle atlandi
     except Exception as e:
         logging.error(f"seen_tx kayit hatasi: {e}")
 
