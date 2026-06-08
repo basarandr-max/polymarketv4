@@ -1082,8 +1082,8 @@ async def run_bot():
                                 f"Win Rate: {wr:.0f}% ({portfolio.winning_trades}W/{portfolio.losing_trades}L)"
                             )
 
-            # STOP-LOSS kontrolu - her 5 taramada bir
-            if app_state["scan_count"] % 5 == 0:
+            # STOP-LOSS kontrolu - her taramada
+            if True:
              async with TelegramNotifier() as sl_notifier:
                 sl_checked = {}
                 for pos_id, pos in list(portfolio.open_positions.items()):
