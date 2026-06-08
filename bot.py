@@ -364,18 +364,69 @@ class Position:
 PORTFOLIO_FILE = "portfolio_state.json"
 SEEN_TX_FILE = "seen_tx.json"
 
+# Railway Variables API - kalici storage
+RAILWAY_TOKEN = os.environ.get("RAILWAY_TOKEN", "")
+RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
+RAILWAY_ENV_ID = os.environ.get("RAILWAY_ENVIRONMENT_ID", "")
+
+def save_state_to_env(key: str, value: str):
+    """Railway Variables'a kaydet (kalici)"""
+    if not RAILWAY_TOKEN or not RAILWAY_PROJECT_ID:
+        return False
+    try:
+        import requests as req
+        url = f"https://backboard.railway.app/graphql/v2"
+        query = """
+        mutation UpsertVariables($input: VariableCollectionUpsertInput!) {
+            variableCollectionUpsert(input: $input)
+        }
+        """
+        variables = {
+            "input": {
+                "projectId": RAILWAY_PROJECT_ID,
+                "environmentId": RAILWAY_ENV_ID,
+                "serviceId": os.environ.get("RAILWAY_SERVICE_ID", ""),
+                "variables": {key: value}
+            }
+        }
+        resp = req.post(url, 
+            json={"query": query, "variables": variables},
+            headers={"Authorization": f"Bearer {RAILWAY_TOKEN}"},
+            timeout=10)
+        return resp.status_code == 200
+    except Exception as e:
+        logging.error(f"Railway env kayit hatasi: {e}")
+        return False
+
+def load_state_from_env(key: str) -> Optional[str]:
+    """Railway Variables'dan oku"""
+    return os.environ.get(key, None)
+
 def save_seen_tx(seen_tx):
     try:
         import json
         data = {w: list(txs) for w, txs in seen_tx.items()}
+        json_str = json.dumps(data)
         with open(SEEN_TX_FILE, "w") as f:
-            json.dump(data, f)
+            f.write(json_str)
+        # Railway Variables'a da kaydet
+        save_state_to_env("SEEN_TX_STATE", json_str)
     except Exception as e:
         logging.error(f"seen_tx kayit hatasi: {e}")
 
 def load_seen_tx():
     try:
         import json
+        # Önce Railway Variables'dan oku
+        railway_state = load_state_from_env("SEEN_TX_STATE")
+        if railway_state:
+            try:
+                data = json.loads(railway_state)
+                logging.info(f"seen_tx Railway Variables'dan yuklendi: {sum(len(v) for v in data.values())} tx")
+                return {w: set(txs) for w, txs in data.items()}
+            except:
+                pass
+        # Dosyadan oku
         if not os.path.exists(SEEN_TX_FILE):
             return {}
         with open(SEEN_TX_FILE) as f:
@@ -406,18 +457,35 @@ def save_portfolio(portfolio):
                 "opened_at": v.opened_at.strftime("%Y-%m-%d %H:%M:%S"),
             } for k, v in portfolio.open_positions.items()}
         }
+        json_str = json.dumps(state)
+        # Dosyaya kaydet
         with open(PORTFOLIO_FILE, "w") as f:
-            json.dump(state, f)
+            f.write(json_str)
+        # Railway Variables'a da kaydet
+        save_state_to_env("PORTFOLIO_STATE", json_str)
     except Exception as e:
         logging.error(f"Portfolio kayit hatasi: {e}")
 
 def load_portfolio():
     try:
         import json
-        if not os.path.exists(PORTFOLIO_FILE):
-            return None
-        with open(PORTFOLIO_FILE) as f:
-            state = json.load(f)
+        # Önce Railway Variables'dan oku
+        railway_state = load_state_from_env("PORTFOLIO_STATE")
+        if railway_state:
+            try:
+                state = json.loads(railway_state)
+                logging.info("Portfolio Railway Variables'dan yuklendi")
+            except:
+                state = None
+        else:
+            state = None
+        # Railway'de yoksa dosyadan oku
+        if state is None:
+            if not os.path.exists(PORTFOLIO_FILE):
+                return None
+            with open(PORTFOLIO_FILE) as f:
+                state = json.load(f)
+            logging.info("Portfolio dosyadan yuklendi")
         p = Portfolio()
         p.cash = Decimal(str(state["cash"]))
         p.initial_capital = Decimal(str(state["initial_capital"]))
