@@ -272,7 +272,7 @@ class PolymarketClient:
     def get_real_balance(self) -> Decimal:
         """Polymarket CLOB API'den bakiye çek"""
         if not self.client:
-            return Decimal(os.environ.get("INITIAL_CAPITAL", "0"))
+            return Decimal(os.environ.get("INITIAL_CAPITAL", "100"))
         try:
             from py_clob_client_v2.clob_types import BalanceAllowanceParams, AssetType
             from py_clob_client_v2 import SignatureTypeV2
@@ -299,7 +299,7 @@ class PolymarketClient:
             return usdc.quantize(Decimal("0.01"))
         except Exception as e:
             logging.error(f"Bakiye hatasi: {e}")
-            return Decimal(os.environ.get("INITIAL_CAPITAL", "0"))
+            return Decimal(os.environ.get("INITIAL_CAPITAL", "100"))
 
     def get_real_balance_rpc(self) -> Decimal:
         """Polygon RPC'den direkt USDC bakiyesi çek"""
