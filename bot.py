@@ -1130,12 +1130,31 @@ async def run_bot():
 
             if app_state["scan_count"] % 20 == 0:
                 async with TelegramNotifier() as notifier:
-                    sign = "+" if portfolio.total_pnl >= 0 else ""
+                    # Açık pozisyonların anlık değerini hesapla
+                    import requests as req_report
+                    live_value = Decimal("0")
+                    checked = {}
+                    for pos in portfolio.open_positions.values():
+                        try:
+                            if pos.token_id in checked:
+                                cur = checked[pos.token_id]
+                            else:
+                                r = req_report.get(f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}", timeout=3)
+                                cur = float(r.json().get("price", float(pos.entry_price))) if r.status_code == 200 else float(pos.entry_price)
+                                checked[pos.token_id] = cur
+                            live_value += pos.size_usd / pos.entry_price * Decimal(str(cur))
+                        except:
+                            live_value += pos.size_usd
+                    live_total = portfolio.cash + live_value
+                    live_pnl = live_total - portfolio.initial_capital
+                    sign = "+" if live_pnl >= 0 else ""
                     await notifier.send(
-                        f"[RAPOR] Tarama #{app_state['scan_count']}\n"
-                        f"Toplam: ${portfolio.total_value:.2f}\n"
-                        f"PnL: {sign}${portfolio.total_pnl:.2f} ({sign}{portfolio.pnl_percent:.1f}%)\n"
-                        f"Acik: {len(portfolio.open_positions)} | Trade: {portfolio.total_trades}"
+                        f"📊 RAPOR Tarama #{app_state['scan_count']}\n"
+                        f"💰 Nakit: ${portfolio.cash:.2f}\n"
+                        f"📦 Pozisyon Değeri: ${live_value:.2f}\n"
+                        f"📊 Toplam: ${live_total:.2f}\n"
+                        f"📈 PnL: {sign}${live_pnl:.2f} ({sign}{float(live_pnl/portfolio.initial_capital*100):.1f}%)\n"
+                        f"📌 Açık: {len(portfolio.open_positions)} | Trade: {portfolio.total_trades}"
                     )
 
         except Exception as e:
