@@ -57,12 +57,6 @@ class Config:
     ]
     TRACKED_USERS: List[Dict] = [
         {"name": "Swisstony",         "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
-        {"name": "afghj2421",           "wallet": "0xb91aeb5accc33a5f9a8615b8ed6b2d352e913987"},
-        {"name": "ferrariChampions2026","wallet": "0xfe787d2da716d60e8acff57fb87eb13cd4d10319"},
-        {"name": "Countryside",         "wallet": "0xbddf61af533ff524d27154e589d2d7a81510c684"},
-        {"name": "HomeRunHazard",       "wallet": "0x5268527977f700f9bf9b6d5cd843859e4e70135d"},
-        {"name": "RN1",                 "wallet": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea"},
-        {"name": "Vatrer",              "wallet": "0x72d815133f9f8b6529e911cf3be492846ce05213"},
     ]
 
 # ==================== POLYMARKET CLIENT ====================
