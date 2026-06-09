@@ -1099,7 +1099,7 @@ async def run_bot():
                         if resp.status_code == 200:
                             current_price = float(resp.json().get("price", pos.entry_price))
                             loss_pct = (float(pos.entry_price) - current_price) / float(pos.entry_price) * 100
-                            if loss_pct >= 50:
+                            if loss_pct >= 40:
                                 logging.info(f"STOP-LOSS: {pos.market_title} %{loss_pct:.0f} zarar")
                                 pnl = Decimal(str(current_price)) * (pos.size_usd / pos.entry_price) - pos.size_usd
                                 if Config.TEST_MODE:
