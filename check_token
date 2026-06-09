@@ -1,0 +1,6 @@
+import requests
+cid = '0x923538d1536acac705794cb5be0b2963b5ccdbadb236115ba60a88ecb43e2d45'
+r = requests.get(f'https://clob.polymarket.com/markets/{cid}', timeout=5)
+print('CLOB Status:', r.status_code, r.text[:100])
+r2 = requests.get(f'https://gamma-api.polymarket.com/markets?conditionId={cid}', timeout=5)
+print('Gamma Status:', r2.status_code, r2.text[:100])
