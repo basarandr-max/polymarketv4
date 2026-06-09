@@ -57,6 +57,11 @@ class Config:
     ]
     TRACKED_USERS: List[Dict] = [
         {"name": "Swisstony",         "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
+        {"name": "beet420",             "wallet": "0xd81e5bc01e4a98d0af93d82dc2c542a4c0f9e3d0"},
+        {"name": "alwaysfade",          "wallet": "0xe5b70fd855af9258d9463992e4f1ed7987905ee3"},
+        {"name": "liquidifier",         "wallet": "0x48185887c8dc95de60ee89722f1d0ee7894cbf0b"},
+        {"name": "anon",               "wallet": "0x492442eab586f242b53bda933fd5de859c8a3782"},
+        {"name": "theboss2",            "wallet": "0x35353a3a2988c7c26e53849d602be60df49aa775"},
     ]
 
 # ==================== POLYMARKET CLIENT ====================
@@ -1076,8 +1081,8 @@ async def run_bot():
                                 f"Win Rate: {wr:.0f}% ({portfolio.winning_trades}W/{portfolio.losing_trades}L)"
                             )
 
-            # STOP-LOSS kontrolu - her taramada
-            if True:
+            # STOP-LOSS devre disi
+            if False:
              async with TelegramNotifier() as sl_notifier:
                 sl_checked = {}
                 for pos_id, pos in list(portfolio.open_positions.items()):
