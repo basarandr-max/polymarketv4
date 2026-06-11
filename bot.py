@@ -1207,15 +1207,15 @@ async def run_bot():
                             trader_stats[t]["pnl"] += pos_pnl
                         except:
                             trader_stats[t]["value"] += pos.size_usd
-
-                    trader_lines = ""
                     for h in app_state["trade_history"]:
-    t = h.get("trader", "")
-    if not t:
-        continue
-    if t not in trader_stats:
-        trader_stats[t] = {"count": 0, "value": Decimal("0"), "pnl": Decimal("0")}
-    trader_stats[t]["pnl"] += Decimal(str(h.get("pnl", 0)))
+                        t = h.get("trader", "")
+                        if not t:
+                            continue
+                        if t not in trader_stats:
+                            trader_stats[t] = {"count": 0, "value": Decimal("0"), "pnl": Decimal("0")}
+                        trader_stats[t]["pnl"] += Decimal(str(h.get("pnl", 0)))
+                    trader_lines = ""
+             
 
                     await notifier.send(
                         f"📊 RAPOR Tarama #{app_state['scan_count']}\n"
