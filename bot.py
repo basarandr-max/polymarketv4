@@ -883,8 +883,8 @@ async def run_bot():
 
             async with TelegramNotifier() as notifier:
                 # 2. bot notifier
-                notifier2 = TelegramNotifier(token=TELEGRAM_TOKEN_2, chat_id=TELEGRAM_CHAT_ID_2)
-                await notifier2.__aenter__()
+              async with = TelegramNotifier(token=TELEGRAM_TOKEN_2, chat_id=TELEGRAM_CHAT_ID_2)
+                wait notifier2.__aexit__(...)
                 
                 # Her 3 taramada bir pozisyonları kontrol et (API yükü azalt)
                 if app_state["scan_count"] % 3 == 0:
