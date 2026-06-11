@@ -1210,9 +1210,13 @@ async def run_bot():
                             trader_stats[t]["value"] += pos.size_usd
 
                     trader_lines = ""
-                    for t, s in sorted(trader_stats.items(), key=lambda x: x[1]["pnl"], reverse=True):
-                        sign = "+" if s["pnl"] >= 0 else ""
-                        trader_lines += f"👤 {t}: {s['count']} işlem | ${float(s['value']):.0f} | {sign}${float(s['pnl']):.2f}\n"
+                    for h in app_state["trade_history"]:
+    t = h.get("trader", "")
+    if not t:
+        continue
+    if t not in trader_stats:
+        trader_stats[t] = {"count": 0, "value": Decimal("0"), "pnl": Decimal("0")}
+    trader_stats[t]["pnl"] += Decimal(str(h.get("pnl", 0)))
 
                     await notifier.send(
                         f"📊 RAPOR Tarama #{app_state['scan_count']}\n"
