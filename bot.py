@@ -903,7 +903,7 @@ async def run_bot():
                     outcome    = "YES" if outcome_i == 0 else "NO"
                     
                     # Trader wallet'ına göre doğru notifier seç
-                    trader_wallet = act.get("wallet", "").lower()
+                    trader_wallet = act.get("tracked_wallet", "").lower()
                     active_notifier = notifier2 if trader_wallet in TRADERS_BOT2 else notifier
 
                     try:
