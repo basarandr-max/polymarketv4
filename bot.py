@@ -56,12 +56,17 @@ class Config:
         "0x1fad72fae204143ff1c3035e99e7c0f65ea8d5cd9bd1070987bd1a3316f772be",
     ]
     TRACKED_USERS: List[Dict] = [
-        {"name": "Swisstony",         "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
-        {"name": "beet420",             "wallet": "0xd81e5bc01e4a98d0af93d82dc2c542a4c0f9e3d0"},
-        {"name": "alwaysfade",          "wallet": "0xe5b70fd855af9258d9463992e4f1ed7987905ee3"},
-        {"name": "liquidifier",         "wallet": "0x48185887c8dc95de60ee89722f1d0ee7894cbf0b"},
-        {"name": "anon",               "wallet": "0x492442eab586f242b53bda933fd5de859c8a3782"},
-        {"name": "theboss2",            "wallet": "0x35353a3a2988c7c26e53849d602be60df49aa775"},
+        {"name": "Swisstony",              "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
+        {"name": "Latina",                "wallet": "0x26437896ed9dfeb2f69765edcafe8fdceaab39ae"},
+        {"name": "Anon2",                 "wallet": "0x6db568e61e5e3de7d87f831431b673f38ce2e279"},
+        {"name": "Anon3",                 "wallet": "0x492442eab586f242b53bda933fd5de859c8a3782"},
+        {"name": "mooseborzoi",           "wallet": "0x84cfffc3f16dcc353094de30d4a45226eccd2f63"},
+        {"name": "Anon5",                 "wallet": "0x2c335066fe58fe9237c3d3dc7b275c2a034a0563"},
+        {"name": "ferrariChampions2026",  "wallet": "0xfe787d2da716d60e8acff57fb87eb13cd4d10319"},
+        {"name": "resadasdasd",           "wallet": "0x157efb90bf2f3bae9eea4f1e9d02abf12ff3add7"},
+        {"name": "beet420",              "wallet": "0xd81e5bc01e4a98d0af93d82dc2c542a4c0f9e3d0"},
+        {"name": "izebel",               "wallet": "0xd0ee8005ad44501453bd5ee31ea863b1b038b834"},
+        {"name": "Soarin22",             "wallet": "0x84dbb7103982e3617704a2ed7d5b39691952aeeb"},
     ]
 
 # ==================== POLYMARKET CLIENT ====================
@@ -459,8 +464,7 @@ def save_portfolio(portfolio):
         # Dosyaya kaydet
         with open(PORTFOLIO_FILE, "w") as f:
             f.write(json_str)
-        # Railway Variables'a da kaydet
-        save_state_to_env("PORTFOLIO_STATE", json_str)
+        # Railway Variables kaydi devre disi (redeploy dongusunu onlemek icin)
     except Exception as e:
         logging.error(f"Portfolio kayit hatasi: {e}")
 
@@ -570,9 +574,9 @@ app_state = {
 
 # ==================== TELEGRAM ====================
 class TelegramNotifier:
-    def __init__(self):
-        self.token   = os.environ.get("TELEGRAM_TOKEN", "")
-        self.chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    def __init__(self, token=None, chat_id=None):
+        self.token   = token or os.environ.get("TELEGRAM_TOKEN", "")
+        self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
         self.session = None
 
     async def __aenter__(self):
@@ -602,6 +606,25 @@ class TelegramNotifier:
             logging.error(f"Telegram hatasi: {e}")
 
 # ==================== TRACKER ====================
+
+# 2. Telegram botu - yeni traderlar için
+TELEGRAM_TOKEN_2   = "8871608668:AAGlB43XPp3Bg0fGvcb443FGbrUas8ht6RQ"
+TELEGRAM_CHAT_ID_2 = "-5183465250"
+
+# Hangi traderlar 2. bota bildirim gönderir
+TRADERS_BOT2 = {
+    "0x26437896ed9dfeb2f69765edcafe8fdceaab39ae",  # Latina
+    "0x6db568e61e5e3de7d87f831431b673f38ce2e279",  # Anon2
+    "0x492442eab586f242b53bda933fd5de859c8a3782",  # Anon3
+    "0x84cfffc3f16dcc353094de30d4a45226eccd2f63",  # mooseborzoi
+    "0x2c335066fe58fe9237c3d3dc7b275c2a034a0563",  # Anon5
+    "0xfe787d2da716d60e8acff57fb87eb13cd4d10319",  # ferrariChampions2026
+    "0x157efb90bf2f3bae9eea4f1e9d02abf12ff3add7",  # resadasdasd
+    "0xd81e5bc01e4a98d0af93d82dc2c542a4c0f9e3d0",  # beet420
+    "0xd0ee8005ad44501453bd5ee31ea863b1b038b834",  # izebel
+    "0x84dbb7103982e3617704a2ed7d5b39691952aeeb",  # Soarin22
+}
+
 class UserTracker:
     def __init__(self, users):
         self.users       = users
@@ -717,7 +740,7 @@ async def check_closed_positions(portfolio, notifier):
                 checked_tokens[pos.token_id] = current_price
             if current_price >= 0.99:
                 pnl = pos.size_usd / pos.entry_price * (Decimal("0.99") - pos.entry_price)
-                portfolio.cash += pos.size_usd + pnl
+                portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))  # %2 komisyon
                 portfolio.realized_pnl += pnl
                 portfolio.winning_trades += 1
                 closed.append((pos.market_title, float(pnl), "KAZANDI ✅"))
@@ -778,7 +801,7 @@ async def run_bot():
                     # Fiyat 0.99+ ise kazandı, 0.01- ise kaybetti - market kapandı
                     if current_price >= 0.99:
                         pnl = pos.size_usd / pos.entry_price * (Decimal("0.99") - pos.entry_price)
-                        portfolio.cash += pos.size_usd + pnl
+                        portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))  # %2 komisyon
                         portfolio.realized_pnl += pnl
                         portfolio.winning_trades += 1
                         closed.append((pos.market_title, float(pnl), "KAZANDI"))
@@ -860,6 +883,10 @@ async def run_bot():
                     logging.info(f"Trade #{i}: user={t.get('tracked_user','?')} side={t.get('side','?')} title={t.get('title','?')} tx={t.get('transactionHash','?')[:15]}")
 
             async with TelegramNotifier() as notifier:
+                # 2. bot notifier
+                notifier2 = TelegramNotifier(token=TELEGRAM_TOKEN_2, chat_id=TELEGRAM_CHAT_ID_2)
+                await notifier2.__aenter__()
+                
                 # Her 3 taramada bir pozisyonları kontrol et (API yükü azalt)
                 if app_state["scan_count"] % 3 == 0:
                     await check_closed_positions(portfolio, notifier)
@@ -875,6 +902,10 @@ async def run_bot():
                     token_id   = act.get("tokenId", act.get("conditionId", ""))
                     outcome_i  = act.get("outcomeIndex", 0)
                     outcome    = "YES" if outcome_i == 0 else "NO"
+                    
+                    # Trader wallet'ına göre doğru notifier seç
+                    trader_wallet = act.get("wallet", "").lower()
+                    active_notifier = notifier2 if trader_wallet in TRADERS_BOT2 else notifier
 
                     try:
                         price = float(act.get("price", 0.5))
@@ -1021,11 +1052,13 @@ async def run_bot():
                             if not Config.TEST_MODE:
                                 portfolio.cash = poly.get_real_balance()
                             else:
-                                portfolio.cash -= Config.TRADE_SIZE
+                                # %2 komisyon dahil maliyet
+                                commission = Config.TRADE_SIZE * Decimal("0.02")
+                                portfolio.cash -= (Config.TRADE_SIZE + commission)
                                 save_portfolio(portfolio)  # Test modunda kaydet
 
                             sign = "+" if portfolio.total_pnl >= 0 else ""
-                            await notifier.send(
+                            await active_notifier.send(
                                 f"{'[TEST] ' if Config.TEST_MODE else ''}POZİSYON AÇILDI\n\n"
                                 f"Trader: *{name}*\n"
                                 f"Market: {title}\n"
@@ -1067,7 +1100,7 @@ async def run_bot():
                             if not Config.TEST_MODE:
                                 portfolio.cash = poly.get_real_balance()
                             else:
-                                portfolio.cash += pos.size_usd + pnl
+                                portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))  # %2 komisyon
                                 save_portfolio(portfolio)  # Test modunda kaydet
 
                             ts = "+" if pnl >= 0 else ""
@@ -1109,7 +1142,7 @@ async def run_bot():
                                 pnl = Decimal(str(current_price)) * (pos.size_usd / pos.entry_price) - pos.size_usd
                                 if Config.TEST_MODE:
                                     # Test modunda simüle et
-                                    portfolio.cash += pos.size_usd + pnl
+                                    portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))  # %2 komisyon
                                     portfolio.realized_pnl += pnl
                                     portfolio.losing_trades += 1
                                     del portfolio.open_positions[pos_id]
@@ -1118,7 +1151,7 @@ async def run_bot():
                                     # Gerçek modda sat
                                     sl_result = poly.sell(pos.token_id, 1, current_price, float(pos.size_usd))
                                     if sl_result:
-                                        portfolio.cash += pos.size_usd + pnl
+                                        portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))  # %2 komisyon
                                         portfolio.realized_pnl += pnl
                                         portfolio.losing_trades += 1
                                         del portfolio.open_positions[pos_id]
@@ -1192,6 +1225,8 @@ async def run_bot():
                         f"━━━━━━━━━━━━━━\n"
                         f"{trader_lines}"
                     )
+                
+                await notifier2.__aexit__(None, None, None)
 
         except Exception as e:
             logging.error(f"Scan hatasi: {e}")
@@ -1339,7 +1374,7 @@ def close_all_positions():
         except:
             current_price = float(pos.entry_price)
         pnl = pos.size_usd / pos.entry_price * (Decimal(str(current_price)) - pos.entry_price)
-        portfolio.cash += pos.size_usd + pnl
+        portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))  # %2 komisyon
         portfolio.realized_pnl += pnl
         if pnl >= 0:
             portfolio.winning_trades += 1
