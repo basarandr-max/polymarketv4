@@ -56,7 +56,6 @@ class Config:
         "0x1fad72fae204143ff1c3035e99e7c0f65ea8d5cd9bd1070987bd1a3316f772be",
     ]
     TRACKED_USERS: List[Dict] = [
-        {"name": "Swisstony",              "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
         {"name": "Latina",                "wallet": "0x26437896ed9dfeb2f69765edcafe8fdceaab39ae"},
         {"name": "Anon2",                 "wallet": "0x6db568e61e5e3de7d87f831431b673f38ce2e279"},
         {"name": "Anon3",                 "wallet": "0x492442eab586f242b53bda933fd5de859c8a3782"},
@@ -575,8 +574,8 @@ app_state = {
 # ==================== TELEGRAM ====================
 class TelegramNotifier:
     def __init__(self, token=None, chat_id=None):
-        self.token   = token or os.environ.get("TELEGRAM_TOKEN", "")
-        self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
+        self.token   = token or os.environ.get("TELEGRAM_TOKEN_2", "")
+        self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID_2", "")
         self.session = None
 
     async def __aenter__(self):
