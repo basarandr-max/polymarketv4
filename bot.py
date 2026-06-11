@@ -1225,7 +1225,7 @@ async def run_bot():
                         f"{trader_lines}"
                     )
                 
-                await notifier2.__aexit__(None, None, None)
+               
 
         except Exception as e:
             logging.error(f"Scan hatasi: {e}")
