@@ -1157,6 +1157,31 @@ async def run_bot():
                     live_total = portfolio.cash + live_value
                     live_pnl = live_total - portfolio.initial_capital
                     sign = "+" if live_pnl >= 0 else ""
+                    # Trader bazında istatistik
+                    trader_stats = {}
+                    for pos in portfolio.open_positions.values():
+                        t = pos.trader_name
+                        if t not in trader_stats:
+                            trader_stats[t] = {"count": 0, "value": Decimal("0"), "pnl": Decimal("0")}
+                        trader_stats[t]["count"] += 1
+                        # Anlık değer
+                        try:
+                            cur_price = checked.get(pos.token_id)
+                            if cur_price is None:
+                                r2 = req_report.get(f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}", timeout=3)
+                                cur_price = float(r2.json().get("price", float(pos.entry_price))) if r2.status_code == 200 else float(pos.entry_price)
+                            pos_value = pos.size_usd / pos.entry_price * Decimal(str(cur_price))
+                            pos_pnl = pos_value - pos.size_usd
+                            trader_stats[t]["value"] += pos_value
+                            trader_stats[t]["pnl"] += pos_pnl
+                        except:
+                            trader_stats[t]["value"] += pos.size_usd
+
+                    trader_lines = ""
+                    for t, s in sorted(trader_stats.items(), key=lambda x: x[1]["pnl"], reverse=True):
+                        sign = "+" if s["pnl"] >= 0 else ""
+                        trader_lines += f"👤 {t}: {s['count']} işlem | ${float(s['value']):.0f} | {sign}${float(s['pnl']):.2f}\n"
+
                     await notifier.send(
                         f"📊 RAPOR Tarama #{app_state['scan_count']}\n"
                         f"💰 Nakit: ${portfolio.cash:.2f}\n"
@@ -1164,10 +1189,8 @@ async def run_bot():
                         f"📊 Toplam: ${live_total:.2f}\n"
                         f"📈 PnL: {sign}${live_pnl:.2f} ({sign}{float(live_pnl/portfolio.initial_capital*100):.1f}%)\n"
                         f"📌 Açık: {len(portfolio.open_positions)} | Trade: {portfolio.total_trades}\n"
-                        + (("━━━━━━━━━━━━━━\n" + "\n".join(
-                            f"{'✅' if pos.side=='YES' else '🔴'} {pos.market_title[:35]} ({pos.side}) ${float(pos.size_usd):.0f}"
-                            for pos in list(portfolio.open_positions.values())[:20]
-                        )) if portfolio.open_positions else "")
+                        f"━━━━━━━━━━━━━━\n"
+                        f"{trader_lines}"
                     )
 
         except Exception as e:
