@@ -399,11 +399,15 @@ class Position:
             "opened_at":     self.opened_at.strftime("%H:%M %d/%m"),
         }
 
-# Railway Volume mount path - kalici storage
-_DATA_DIR      = os.environ.get("DATA_DIR", "/data")
-os.makedirs(_DATA_DIR, exist_ok=True)
+# Kalici storage - Railway Volume varsa /data, yoksa lokal klasor
+_DATA_DIR = os.environ.get("DATA_DIR", "/data" if os.path.exists("/data") else ".")
+try:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+except Exception:
+    _DATA_DIR = "."
 PORTFOLIO_FILE = os.path.join(_DATA_DIR, "portfolio_state.json")
 SEEN_TX_FILE   = os.path.join(_DATA_DIR, "seen_tx.json")
+logging.info(f"Storage klasoru: {_DATA_DIR}")
 RAILWAY_TOKEN      = os.environ.get("RAILWAY_TOKEN", "")
 RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
 RAILWAY_ENV_ID     = os.environ.get("RAILWAY_ENVIRONMENT_ID", "")
