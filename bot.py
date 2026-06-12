@@ -399,8 +399,11 @@ class Position:
             "opened_at":     self.opened_at.strftime("%H:%M %d/%m"),
         }
 
-PORTFOLIO_FILE = "portfolio_state.json"
-SEEN_TX_FILE   = "seen_tx.json"
+# Railway Volume mount path - kalici storage
+_DATA_DIR      = os.environ.get("DATA_DIR", "/data")
+os.makedirs(_DATA_DIR, exist_ok=True)
+PORTFOLIO_FILE = os.path.join(_DATA_DIR, "portfolio_state.json")
+SEEN_TX_FILE   = os.path.join(_DATA_DIR, "seen_tx.json")
 RAILWAY_TOKEN      = os.environ.get("RAILWAY_TOKEN", "")
 RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
 RAILWAY_ENV_ID     = os.environ.get("RAILWAY_ENVIRONMENT_ID", "")
@@ -669,7 +672,16 @@ async def check_closed_positions(portfolio: Portfolio, notifier: TelegramNotifie
                     portfolio.realized_pnl += pnl
                     portfolio.winning_trades += 1
                     del portfolio.open_positions[pos_id]
-                closed.append((pos.market_title, float(pnl), "KAZANDI ✅"))
+                closed.append((pos.trader_name, pos.market_title, pos.side, float(pnl), "KAZANDI ✅"))
+                app_state["day_trades"].append({
+                    "time":   datetime.now().strftime("%H:%M"),
+                    "trader": pos.trader_name,
+                    "market": pos.market_title,
+                    "side":   pos.side,
+                    "entry":  float(pos.entry_price),
+                    "exit":   float(Config.MARKET_WIN_PRICE),
+                    "pnl":    float(pnl),
+                })
             elif current_price <= float(Config.MARKET_LOSE_PRICE):
                 pnl = pos.size_usd / pos.entry_price * (Config.MARKET_LOSE_PRICE - pos.entry_price)
                 with _portfolio_lock:
@@ -677,16 +689,34 @@ async def check_closed_positions(portfolio: Portfolio, notifier: TelegramNotifie
                     portfolio.realized_pnl += pnl
                     portfolio.losing_trades += 1
                     del portfolio.open_positions[pos_id]
-                closed.append((pos.market_title, float(pnl), "KAYBETTI ❌"))
+                closed.append((pos.trader_name, pos.market_title, pos.side, float(pnl), "KAYBETTI ❌"))
+                # Gunluk trade kaydina ekle
+                app_state["day_trades"].append({
+                    "time":   datetime.now().strftime("%H:%M"),
+                    "trader": pos.trader_name,
+                    "market": pos.market_title,
+                    "side":   pos.side,
+                    "entry":  float(pos.entry_price),
+                    "exit":   float(Config.MARKET_LOSE_PRICE),
+                    "pnl":    float(pnl),
+                })
         except Exception as e:
             logging.error(f"Pozisyon kontrol hatasi ({pos_id}): {e}")
     if closed:
         save_portfolio(portfolio)
-        msg = "📊 POZİSYONLAR KAPANDI\n"
-        for title, pnl, result in closed:
+        for trader, title, side, pnl, result in closed:
             sign = "+" if pnl >= 0 else ""
-            msg += f"{result}: {title[:35]} ({sign}${pnl:.2f})\n"
-        await notifier.send(msg)
+            wr   = (portfolio.winning_trades / portfolio.total_trades * 100) if portfolio.total_trades > 0 else 0
+            msg  = (
+                f"{result} POZISYON KAPANDI\n\n"
+                f"Trader: *{trader}*\n"
+                f"Market: {title[:50]}\n"
+                f"Yon: {side}\n"
+                f"PnL: {sign}${abs(pnl):.2f}\n"
+                f"Nakit: ${float(portfolio.cash):.2f}\n"
+                f"Win rate: {wr:.0f}% ({portfolio.winning_trades}K/{portfolio.losing_trades}L)"
+            )
+            await notifier.send(msg)
 
 # ==================== RAPOR FONKSİYONLARI ====================
 
@@ -818,23 +848,73 @@ async def run_bot():
     poly = PolymarketClient()
     app_state["poly_client"] = poly
 
-    if Config.TEST_MODE:
-        saved = load_portfolio()
-        if saved:
-            app_state["portfolio"] = saved
-            for pos_id in saved.open_positions:
-                app_state["seen_conditions"].add(pos_id)
-        else:
-            app_state["portfolio"].cash = Config.INITIAL_CAPITAL
-            app_state["portfolio"].initial_capital = Config.INITIAL_CAPITAL
+    # Tek kalici ClientSession
+    connector    = aiohttp.TCPConnector(ssl=True, limit=20)
+    main_session = aiohttp.ClientSession(connector=connector)
+
+    # Her modda once kaydedilmis portfolio yukle
+    saved = load_portfolio()
+    if saved:
+        app_state["portfolio"] = saved
+        logging.info(f"Portfolio yuklendi: {len(saved.open_positions)} pozisyon, ${saved.cash:.2f}")
+    else:
+        app_state["portfolio"].cash = Config.INITIAL_CAPITAL
+        app_state["portfolio"].initial_capital = Config.INITIAL_CAPITAL
+        logging.info("Yeni portfolio olusturuldu")
 
     portfolio = app_state["portfolio"]
 
-    # P1 DÜZELTMESİ: Tek kalıcı ClientSession - her taramada TCP/TLS yeniden kurulmuyor
-    connector      = aiohttp.TCPConnector(ssl=True, limit=20)
-    main_session   = aiohttp.ClientSession(connector=connector)
+    # Gercek modda: Polymarket API'den acik pozisyonlari cek ve portfolio ile eslestir
+    if not Config.TEST_MODE and poly.client:
+        poly.sync_portfolio_balance(portfolio)
+        logging.info("Polymarket acik pozisyonlari cekiliyor...")
+        try:
+            real_pos = await async_get(
+                main_session,
+                f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0.01"
+            )
+            if real_pos and isinstance(real_pos, list):
+                logging.info(f"Polymarket'te {len(real_pos)} acik pozisyon bulundu")
+                for p in real_pos:
+                    cond_id = p.get("conditionId", "")
+                    if not cond_id:
+                        continue
+                    # seen_conditions'a ekle - yeniden alinmasin
+                    outcome_i = int(p.get("outcomeIndex", 0))
+                    app_state["seen_conditions"].add(f"{cond_id}_{outcome_i}")
+                    # Portfolio'da yoksa ekle (deploy oncesi acilmis pozisyonlar)
+                    pos_key = f"recovered_{cond_id[:20]}_{outcome_i}"
+                    if not any(pos_key in pid for pid in portfolio.open_positions):
+                        size = Decimal(str(p.get("size", p.get("currentValue", Config.TRADE_SIZE))))
+                        avg_price = float(p.get("avgPrice", p.get("price", 0.5)))
+                        token_id  = p.get("asset", p.get("tokenId", ""))
+                        outcome   = "YES" if outcome_i == 0 else "NO"
+                        title     = str(p.get("title", p.get("question", "Bilinmiyor")))[:80]
+                        # Sadece bot'un acmadigi pozisyonlari ekle
+                        already_tracked = any(
+                            pos.token_id == token_id
+                            for pos in portfolio.open_positions.values()
+                            if token_id
+                        )
+                        if not already_tracked and token_id:
+                            pos = Position(
+                                position_id=pos_key,
+                                trader_name="[deploy-oncesi]",
+                                market_title=title,
+                                token_id=token_id,
+                                side=outcome,
+                                outcome_index=outcome_i,
+                                entry_price=Decimal(str(avg_price)),
+                                size_usd=size,
+                            )
+                            portfolio.open_positions[pos_key] = pos
+                            logging.info(f"Deploy oncesi pozisyon eklendi: {title[:40]}")
+                save_portfolio(portfolio)
+        except Exception as e:
+            logging.error(f"Pozisyon restore hatasi: {e}")
+        portfolio.initial_capital = portfolio.cash + portfolio.open_value
 
-    # Başlangıçta açık pozisyon kontrolü
+    # Test modunda kapanmis pozisyonlari kontrol et
     if Config.TEST_MODE and portfolio.open_positions:
         for pos_id, pos in list(portfolio.open_positions.items()):
             try:
@@ -855,15 +935,10 @@ async def run_bot():
                 logging.error(f"Baslangic pozisyon kontrolu: {e}")
         save_portfolio(portfolio)
 
-    if not Config.TEST_MODE and poly.client:
-        poly.sync_portfolio_balance(portfolio)
-        data = await async_get(main_session, f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0.01")
-        if data and isinstance(data, list):
-            for p in data:
-                cond_id = p.get("conditionId", "")
-                if cond_id:
-                    app_state["seen_conditions"].add(cond_id)
-        portfolio.initial_capital = portfolio.cash + portfolio.open_value
+    # seen_conditions'a mevcut pozisyonlari ekle
+    for pos_id, pos in portfolio.open_positions.items():
+        cond_short = pos.position_id.split("_")[1] if "_" in pos.position_id else pos.position_id
+        app_state["seen_conditions"].add(f"{cond_short}_{pos.outcome_index}")
 
     mod   = "TEST" if Config.TEST_MODE else "GERCEK"
     sign  = "+" if portfolio.realized_pnl >= 0 else ""
