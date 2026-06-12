@@ -56,16 +56,12 @@ class Config:
         "0x1fad72fae204143ff1c3035e99e7c0f65ea8d5cd9bd1070987bd1a3316f772be",
     ]
     TRACKED_USERS: List[Dict] = [
-        {"name": "Latina",                "wallet": "0x26437896ed9dfeb2f69765edcafe8fdceaab39ae"},
-        {"name": "Anon2",                 "wallet": "0x6db568e61e5e3de7d87f831431b673f38ce2e279"},
-        {"name": "Anon3",                 "wallet": "0x492442eab586f242b53bda933fd5de859c8a3782"},
-        {"name": "mooseborzoi",           "wallet": "0x84cfffc3f16dcc353094de30d4a45226eccd2f63"},
-        {"name": "Anon5",                 "wallet": "0x2c335066fe58fe9237c3d3dc7b275c2a034a0563"},
-        {"name": "ferrariChampions2026",  "wallet": "0xfe787d2da716d60e8acff57fb87eb13cd4d10319"},
-        {"name": "resadasdasd",           "wallet": "0x157efb90bf2f3bae9eea4f1e9d02abf12ff3add7"},
-        {"name": "beet420",               "wallet": "0xd81e5bc01e4a98d0af93d82dc2c542a4c0f9e3d0"},
-        {"name": "izebel",                "wallet": "0xd0ee8005ad44501453bd5ee31ea863b1b038b834"},
-        {"name": "Soarin22",              "wallet": "0x84dbb7103982e3617704a2ed7d5b39691952aeeb"},
+        {"name": "Oddn",              "wallet": "0xa53c26443fb636d8ae31ac24f62fc1d5ef8f67a5"},
+        {"name": "Swisstony",         "wallet": "0x204f72f35326db932158cba6adff0b9a1da95e14"},
+        {"name": "LaBradfordSmith22", "wallet": "0x9495425feeb0c250accb89275c97587011b19a27"},
+        {"name": "Mosley1",           "wallet": "0x5bec79df9add70a3892041ab1a5516b60f53b215"},
+        {"name": "wan123",            "wallet": "0xde7be6d489bce070a959e0cb813128ae659b5f4b"},
+        {"name": "Tiger200",          "wallet": "0x6211f97a76ed5c4b1d658f637041ac5f293db89e"},
     ]
 
 # ==================== POLYMARKET CLIENT ====================
@@ -178,6 +174,7 @@ class PolymarketClient:
             logging.error("CLOB client yok!")
             return None
         try:
+            # Eger condition_id zaten bir token ID ise (64+ haneli hex), direkt kullan
             if len(condition_id) > 50 and not condition_id.startswith("0x"):
                 token_id = condition_id
                 logging.info(f"Direkt token ID kullaniliyor: {token_id[:20]}...")
@@ -242,35 +239,10 @@ class PolymarketClient:
             logging.error(f"SELL hatasi: {e}")
             return None
 
-    def cancel_all_orders(self) -> Dict:
-        if Config.TEST_MODE:
-            logging.info("[TEST] Tüm emirler iptal edildi (simülasyon)")
-            return {"cancelled": 0, "test": True}
-        if not self.client:
-            logging.error("CLOB client yok!")
-            return {"error": "CLOB client yok"}
-        try:
-            open_orders = self.client.get_orders({"status": "LIVE"})
-            if not open_orders:
-                logging.info("İptal edilecek açık emir yok")
-                return {"cancelled": 0}
-            order_ids = []
-            for o in (open_orders if isinstance(open_orders, list) else []):
-                oid = o.get("id") or o.get("order_id")
-                if oid:
-                    order_ids.append(oid)
-            if not order_ids:
-                return {"cancelled": 0}
-            result = self.client.cancel_orders(order_ids)
-            logging.info(f"İptal sonucu: {result}")
-            return {"cancelled": len(order_ids), "result": str(result)}
-        except Exception as e:
-            logging.error(f"cancel_all_orders hatasi: {e}")
-            return {"error": str(e)}
-
     def get_real_balance(self) -> Decimal:
+        """Polymarket CLOB API'den bakiye çek"""
         if not self.client:
-            return Decimal(os.environ.get("INITIAL_CAPITAL", "100"))
+            return Decimal(os.environ.get("INITIAL_CAPITAL", "0"))
         try:
             from py_clob_client_v2.clob_types import BalanceAllowanceParams, AssetType
             from py_clob_client_v2 import SignatureTypeV2
@@ -297,9 +269,10 @@ class PolymarketClient:
             return usdc.quantize(Decimal("0.01"))
         except Exception as e:
             logging.error(f"Bakiye hatasi: {e}")
-            return Decimal(os.environ.get("INITIAL_CAPITAL", "100"))
+            return Decimal(os.environ.get("INITIAL_CAPITAL", "0"))
 
     def get_real_balance_rpc(self) -> Decimal:
+        """Polygon RPC'den direkt USDC bakiyesi çek"""
         try:
             import requests
             USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
@@ -324,6 +297,7 @@ class PolymarketClient:
 
     def sync_portfolio_balance(self, portfolio) -> None:
         real = self.get_real_balance()
+        # API yanlış dönerse RPC'den dene
         if real <= Decimal("0") or real > Decimal("100000"):
             logging.warning("API bakiye hatalı, RPC'den deneniyor...")
             real = self.get_real_balance_rpc()
@@ -356,144 +330,6 @@ class Position:
             "size_usd":     float(self.size_usd),
             "opened_at":    self.opened_at.strftime("%H:%M %d/%m"),
         }
-
-PORTFOLIO_FILE = "portfolio_state.json"
-SEEN_TX_FILE = "seen_tx.json"
-
-RAILWAY_TOKEN = os.environ.get("RAILWAY_TOKEN", "")
-RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
-RAILWAY_ENV_ID = os.environ.get("RAILWAY_ENVIRONMENT_ID", "")
-
-def save_state_to_env(key: str, value: str):
-    if not RAILWAY_TOKEN or not RAILWAY_PROJECT_ID:
-        return False
-    try:
-        import requests as req
-        url = f"https://backboard.railway.app/graphql/v2"
-        query = """
-        mutation UpsertVariables($input: VariableCollectionUpsertInput!) {
-            variableCollectionUpsert(input: $input)
-        }
-        """
-        variables = {
-            "input": {
-                "projectId": RAILWAY_PROJECT_ID,
-                "environmentId": RAILWAY_ENV_ID,
-                "serviceId": os.environ.get("RAILWAY_SERVICE_ID", ""),
-                "variables": {key: value}
-            }
-        }
-        resp = req.post(url,
-            json={"query": query, "variables": variables},
-            headers={"Authorization": f"Bearer {RAILWAY_TOKEN}"},
-            timeout=10)
-        return resp.status_code == 200
-    except Exception as e:
-        logging.error(f"Railway env kayit hatasi: {e}")
-        return False
-
-def load_state_from_env(key: str) -> Optional[str]:
-    return os.environ.get(key, None)
-
-def save_seen_tx(seen_tx):
-    try:
-        import json
-        data = {w: list(txs) for w, txs in seen_tx.items()}
-        json_str = json.dumps(data)
-        with open(SEEN_TX_FILE, "w") as f:
-            f.write(json_str)
-    except Exception as e:
-        logging.error(f"seen_tx kayit hatasi: {e}")
-
-def load_seen_tx():
-    try:
-        import json
-        railway_state = load_state_from_env("SEEN_TX_STATE")
-        if railway_state:
-            try:
-                data = json.loads(railway_state)
-                logging.info(f"seen_tx Railway Variables'dan yuklendi: {sum(len(v) for v in data.values())} tx")
-                return {w: set(txs) for w, txs in data.items()}
-            except:
-                pass
-        if not os.path.exists(SEEN_TX_FILE):
-            return {}
-        with open(SEEN_TX_FILE) as f:
-            data = json.load(f)
-        return {w: set(txs) for w, txs in data.items()}
-    except Exception as e:
-        logging.error(f"seen_tx yukle hatasi: {e}")
-        return {}
-
-def save_portfolio(portfolio):
-    try:
-        import json
-        state = {
-            "cash": float(portfolio.cash),
-            "initial_capital": float(portfolio.initial_capital),
-            "realized_pnl": float(portfolio.realized_pnl),
-            "total_trades": portfolio.total_trades,
-            "winning_trades": portfolio.winning_trades,
-            "losing_trades": portfolio.losing_trades,
-            "open_positions": {k: {
-                "position_id": v.position_id,
-                "trader_name": v.trader_name,
-                "market_title": v.market_title,
-                "token_id": v.token_id,
-                "side": v.side,
-                "entry_price": float(v.entry_price),
-                "size_usd": float(v.size_usd),
-                "opened_at": v.opened_at.strftime("%Y-%m-%d %H:%M:%S"),
-            } for k, v in portfolio.open_positions.items()}
-        }
-        json_str = json.dumps(state)
-        with open(PORTFOLIO_FILE, "w") as f:
-            f.write(json_str)
-    except Exception as e:
-        logging.error(f"Portfolio kayit hatasi: {e}")
-
-def load_portfolio():
-    try:
-        import json
-        railway_state = load_state_from_env("PORTFOLIO_STATE")
-        if railway_state:
-            try:
-                state = json.loads(railway_state)
-                logging.info("Portfolio Railway Variables'dan yuklendi")
-            except:
-                state = None
-        else:
-            state = None
-        if state is None:
-            if not os.path.exists(PORTFOLIO_FILE):
-                return None
-            with open(PORTFOLIO_FILE) as f:
-                state = json.load(f)
-            logging.info("Portfolio dosyadan yuklendi")
-        p = Portfolio()
-        p.cash = Decimal(str(state["cash"]))
-        p.initial_capital = Decimal(str(state["initial_capital"]))
-        p.realized_pnl = Decimal(str(state["realized_pnl"]))
-        p.total_trades = state["total_trades"]
-        p.winning_trades = state["winning_trades"]
-        p.losing_trades = state["losing_trades"]
-        for k, v in state["open_positions"].items():
-            pos = Position(
-                position_id=v["position_id"],
-                trader_name=v["trader_name"],
-                market_title=v["market_title"],
-                token_id=v["token_id"],
-                side=v["side"],
-                entry_price=Decimal(str(v["entry_price"])),
-                size_usd=Decimal(str(v["size_usd"])),
-                opened_at=datetime.strptime(v["opened_at"], "%Y-%m-%d %H:%M:%S"),
-            )
-            p.open_positions[k] = pos
-        logging.info(f"Portfolio yuklendi: {len(p.open_positions)} pozisyon, Nakit: ${p.cash:.2f}")
-        return p
-    except Exception as e:
-        logging.error(f"Portfolio yukle hatasi: {e}")
-        return None
 
 @dataclass
 class Portfolio:
@@ -533,39 +369,32 @@ class Portfolio:
             "open_positions":  [p.to_dict() for p in self.open_positions.values()],
         }
 
-def _init_tracked_users():
-    import json
-    try:
-        if os.path.exists("traders.json"):
-            with open("traders.json") as f:
-                return json.load(f)
-    except:
-        pass
-    return list(Config.TRACKED_USERS)
-
 app_state = {
-    "running":          False,
-    "scan_count":       0,
-    "portfolio":        Portfolio(),
-    "trade_history":    [],
-    "tracked_users":    _init_tracked_users(),
-    "poly_client":      None,
+    "running":       False,
+    "scan_count":    0,
+    "portfolio":     Portfolio(),
+    "trade_history": [],
+    "tracked_users": list(Config.TRACKED_USERS),
+    "poly_client":   None,
     "no_cash_notified": False,
-    "seen_conditions":  set(),
+    "seen_conditions": set(),
 }
 
 # ==================== TELEGRAM ====================
 class TelegramNotifier:
-    def __init__(self, token=None, chat_id=None):
-        self.token   = token or os.environ.get("TELEGRAM_TOKEN", "")
-        self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
+    def __init__(self):
+        self.token   = os.environ.get("TELEGRAM_TOKEN", "")
+        self.chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
         self.session = None
 
     async def __aenter__(self):
-        connector = aiohttp.TCPConnector(ssl=True)
+        import ssl
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
         self.session = aiohttp.ClientSession(connector=connector)
         return self
-
     async def __aexit__(self, *_):
         if self.session: await self.session.close()
 
@@ -577,10 +406,9 @@ class TelegramNotifier:
         try:
             async with self.session.post(url, json={
                 "chat_id": self.chat_id,
-                "text": msg[:4096],
-                "parse_mode": "Markdown",
-                "disable_web_page_preview": True
-            }, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                "text": msg,
+                "parse_mode": "Markdown"
+            }, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status == 200:
                     logging.info("Telegram mesaji gonderildi!")
                 else:
@@ -589,35 +417,12 @@ class TelegramNotifier:
             logging.error(f"Telegram hatasi: {e}")
 
 # ==================== TRACKER ====================
-
-# 2. Telegram botu - env'den oku
-TELEGRAM_TOKEN_2   = os.environ.get("TELEGRAM_TOKEN_2", "")
-TELEGRAM_CHAT_ID_2 = os.environ.get("TELEGRAM_CHAT_ID_2", "")
-
-# Hangi traderlar 2. bota bildirim gönderir
-TRADERS_BOT2 = {
-    "0x26437896ed9dfeb2f69765edcafe8fdceaab39ae",  # Latina
-    "0x6db568e61e5e3de7d87f831431b673f38ce2e279",  # Anon2
-    "0x492442eab586f242b53bda933fd5de859c8a3782",  # Anon3
-    "0x84cfffc3f16dcc353094de30d4a45226eccd2f63",  # mooseborzoi
-    "0x2c335066fe58fe9237c3d3dc7b275c2a034a0563",  # Anon5
-    "0xfe787d2da716d60e8acff57fb87eb13cd4d10319",  # ferrariChampions2026
-    "0x157efb90bf2f3bae9eea4f1e9d02abf12ff3add7",  # resadasdasd
-    "0xd81e5bc01e4a98d0af93d82dc2c542a4c0f9e3d0",  # beet420
-    "0xd0ee8005ad44501453bd5ee31ea863b1b038b834",  # izebel
-    "0x84dbb7103982e3617704a2ed7d5b39691952aeeb",  # Soarin22
-}
-
 class UserTracker:
     def __init__(self, users):
-        self.users    = users
-        self.session  = None
-        self.last_req = 0
-        saved_tx = load_seen_tx()
-        self.seen_tx = {u["wallet"]: saved_tx.get(u["wallet"], set()) for u in users}
-        if saved_tx:
-            total = sum(len(v) for v in self.seen_tx.values())
-            logging.info(f"seen_tx yuklendi: {total} tx")
+        self.users       = users
+        self.session     = None
+        self.last_req    = 0
+        self.seen_tx     = {u["wallet"]: set() for u in users}
         self.initialized = {u["wallet"]: False for u in users}
 
     async def _get(self, url):
@@ -645,20 +450,21 @@ class UserTracker:
                 self.seen_tx[w].add(tx); continue
             if tx in self.seen_tx[w]: continue
             self.seen_tx[w].add(tx)
+            # Sadece son 3 dakika icindeki islemleri kopyala
             try:
+                # Farkli timestamp alanlari dene
                 trade_ts = act.get("timestamp") or act.get("createdAt") or act.get("blockTimestamp") or 0
                 if isinstance(trade_ts, str):
                     from datetime import datetime
                     trade_ts = datetime.fromisoformat(trade_ts.replace("Z", "+00:00")).timestamp()
-                trade_ts = float(trade_ts)
-                age = now_ts - trade_ts
-                logging.debug(f"Trade yasi: {age:.0f}s - {tx[:10]}")
-                if age > 300 or age < -60:
-                    logging.info(f"Eski/gecersiz islem atlandi ({age:.0f}s): {tx[:10]}...")
+                if not trade_ts:
+                    logging.warning(f"Timestamp yok, islem atlaniyor: {tx[:10]}")
+                    continue
+                if (now_ts - float(trade_ts)) > 180:
+                    logging.info(f"Eski islem atlandi ({int(now_ts - float(trade_ts))}s): {tx[:10]}...")
                     continue
             except Exception as ts_err:
-                logging.warning(f"Timestamp hatasi, islem atlaniyor: {ts_err}")
-                continue
+                logging.debug(f"Timestamp hatasi: {ts_err}")
             try:
                 size = Decimal(str(act.get("usdcSize", "0")))
             except:
@@ -680,6 +486,7 @@ class UserTracker:
 
 # ==================== BOT ====================
 async def sync_open_positions_from_ui(poly, portfolio):
+    """Polymarket UI'dan açık pozisyonları çek ve senkronize et"""
     try:
         import requests
         url = f"https://gamma-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&active=true"
@@ -687,6 +494,7 @@ async def sync_open_positions_from_ui(poly, portfolio):
         if resp.status_code == 200:
             positions = resp.json()
             logging.info(f"UI'dan {len(positions)} acik pozisyon bulundu")
+            # Bot'un takip etmediği pozisyonları temizle
             if not positions:
                 portfolio.open_positions.clear()
                 logging.info("Acik pozisyon yok, portfoy temizlendi")
@@ -696,148 +504,31 @@ async def sync_open_positions_from_ui(poly, portfolio):
         logging.error(f"Pozisyon senkronizasyon hatasi: {e}")
 
 
-async def check_closed_positions(portfolio, notifier):
-    import requests as req
-    if not portfolio.open_positions:
-        return
-    checked_tokens = {}
-    closed = []
-    for pos_id, pos in list(portfolio.open_positions.items()):
-        try:
-            if not pos.token_id:
-                continue
-            if pos.token_id in checked_tokens:
-                current_price = checked_tokens[pos.token_id]
-            else:
-                url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
-                resp = req.get(url, timeout=5)
-                if resp.status_code != 200:
-                    continue
-                current_price = float(resp.json().get("price", 0))
-                checked_tokens[pos.token_id] = current_price
-            if current_price >= 0.99:
-                pnl = pos.size_usd / pos.entry_price * (Decimal("0.99") - pos.entry_price)
-                portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))
-                portfolio.realized_pnl += pnl
-                portfolio.winning_trades += 1
-                closed.append((pos.market_title, float(pnl), "KAZANDI ✅"))
-                del portfolio.open_positions[pos_id]
-                logging.info(f"Pozisyon kapandi KAZANDI: {pos.market_title} PnL: +${float(pnl):.2f}")
-            elif current_price <= 0.01:
-                pnl = pos.size_usd / pos.entry_price * (Decimal("0.01") - pos.entry_price)
-                portfolio.cash += max(Decimal("0"), pos.size_usd + pnl)
-                portfolio.realized_pnl += pnl
-                portfolio.losing_trades += 1
-                closed.append((pos.market_title, float(pnl), "KAYBETTI ❌"))
-                del portfolio.open_positions[pos_id]
-                logging.info(f"Pozisyon kapandi KAYBETTI: {pos.market_title} PnL: ${float(pnl):.2f}")
-        except Exception as e:
-            logging.error(f"Pozisyon kontrol hatasi ({pos_id}): {e}")
-    if closed:
-        save_portfolio(portfolio)
-        msg = "📊 POZİSYONLAR KAPANDI\n"
-        for title, pnl, result in closed:
-            sign = "+" if pnl >= 0 else ""
-            msg += f"{result}: {title[:35]} ({sign}${pnl:.2f})\n"
-        await notifier.send(msg)
-
 async def run_bot():
     app_state["running"] = True
+    portfolio = app_state["portfolio"]
     poly = PolymarketClient()
     app_state["poly_client"] = poly
 
-    if Config.TEST_MODE:
-        saved = load_portfolio()
-        if saved:
-            app_state["portfolio"] = saved
-            for pos_id in saved.open_positions:
-                app_state["seen_conditions"].add(pos_id)
-            logging.info(f"Test portfolio yuklendi: {len(saved.open_positions)} pozisyon, Nakit: ${saved.cash:.2f}")
-        else:
-            logging.info("Yeni test portfolio olusturuluyor")
-            app_state["portfolio"].cash = Config.INITIAL_CAPITAL
-            app_state["portfolio"].initial_capital = Config.INITIAL_CAPITAL
-
-    portfolio = app_state["portfolio"]
-
-    if Config.TEST_MODE and portfolio.open_positions:
-        import requests
-        logging.info(f"Acik pozisyonlar kontrol ediliyor: {len(portfolio.open_positions)} adet")
-        closed = []
-        for pos_id, pos in list(portfolio.open_positions.items()):
-            try:
-                url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
-                resp = requests.get(url, timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    current_price = float(data.get("price", 0))
-                    if current_price >= 0.99:
-                        pnl = pos.size_usd / pos.entry_price * (Decimal("0.99") - pos.entry_price)
-                        portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))
-                        portfolio.realized_pnl += pnl
-                        portfolio.winning_trades += 1
-                        closed.append((pos.market_title, float(pnl), "KAZANDI"))
-                        del portfolio.open_positions[pos_id]
-                        logging.info(f"Pozisyon kapandi (KAZANDI): {pos.market_title} PnL: +${float(pnl):.2f}")
-                    elif current_price <= 0.01:
-                        pnl = pos.size_usd / pos.entry_price * (Decimal("0.01") - pos.entry_price)
-                        portfolio.cash += max(Decimal("0"), pos.size_usd + pnl)
-                        portfolio.realized_pnl += pnl
-                        portfolio.losing_trades += 1
-                        closed.append((pos.market_title, float(pnl), "KAYBETTI"))
-                        del portfolio.open_positions[pos_id]
-                        logging.info(f"Pozisyon kapandi (KAYBETTI): {pos.market_title} PnL: ${float(pnl):.2f}")
-            except Exception as e:
-                logging.error(f"Pozisyon kontrol hatasi: {e}")
-        if closed:
-            save_portfolio(portfolio)
-            msg = "POZISYONLAR KAPANDI\n"
-            for title, pnl, result in closed:
-                sign = "+" if pnl >= 0 else ""
-                msg += f"{result}: {title[:30]} ({sign}${pnl:.2f})\n"
-            logging.info(msg)
-
-    logging.info("Bot basliyor, mevcut pozisyonlar korunuyor...")
+    # Başlangıçta pozisyonları temizle ve gerçek bakiyeyi çek
+    portfolio.open_positions.clear()
+    app_state["seen_conditions"].clear()
+    logging.info("Pozisyonlar temizlendi, sifirdan basliyor")
     if not Config.TEST_MODE and poly.client:
         poly.sync_portfolio_balance(portfolio)
-        try:
-            import requests
-            url = f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0.01"
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                positions = resp.json()
-                logging.info(f"Polymarket'te {len(positions)} acik pozisyon bulundu")
-                for p in positions:
-                    cond_id = p.get("conditionId", "")
-                    if cond_id:
-                        app_state["seen_conditions"].add(cond_id)
-                logging.info(f"seen_conditions guncellendi: {len(app_state['seen_conditions'])} pozisyon")
-        except Exception as e:
-            logging.error(f"Pozisyon senkronizasyon hatasi: {e}")
         open_value = sum(p.size_usd for p in portfolio.open_positions.values())
         portfolio.initial_capital = portfolio.cash + open_value
         logging.info(f"Portföy senkronize: Cash=${portfolio.cash:.2f}, Toplam=${portfolio.initial_capital:.2f}")
 
     mod = "TEST" if Config.TEST_MODE else "GERCEK"
-    portfolio = app_state["portfolio"]
-    acik = len(portfolio.open_positions)
-    nakit = float(portfolio.cash)
-    toplam = float(portfolio.cash) + sum(float(p.size_usd) for p in portfolio.open_positions.values())
-    pnl = float(portfolio.realized_pnl)
-    sign = "+" if pnl >= 0 else ""
     async with TelegramNotifier() as notifier:
         await notifier.send(
-            f"🤖 BOT BAŞLADI\n"
+            f"BOT v5.2 BASLADI\n"
             f"Mod: *{mod}*\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"💰 Nakit: ${nakit:.2f}\n"
-            f"📊 Toplam: ${toplam:.2f}\n"
-            f"📈 PnL: {sign}${pnl:.2f}\n"
-            f"📌 Açık Pozisyon: {acik} adet\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"👥 Takip: {len(app_state['tracked_users'])} trader"
+            f"Trade boyutu: ${Config.TRADE_SIZE}\n"
+            f"Trader sayisi: {len(app_state['tracked_users'])}\n"
+            f"Cuzdan: `{Config.DEPOSIT_WALLET or Config.EOA_ADDRESS[:10]}...`"
         )
-    logging.info(f"Bot basliyor - Mod: {mod}, Trader: {len(app_state['tracked_users'])}")
 
     tracker = UserTracker(list(app_state["tracked_users"]))
 
@@ -853,299 +544,262 @@ async def run_bot():
                     logging.info(f"Trade #{i}: user={t.get('tracked_user','?')} side={t.get('side','?')} title={t.get('title','?')} tx={t.get('transactionHash','?')[:15]}")
 
             async with TelegramNotifier() as notifier:
-                async with TelegramNotifier(token=TELEGRAM_TOKEN_2, chat_id=TELEGRAM_CHAT_ID_2) as notifier2:
+                for act in trades:
+                    side       = act.get("side", "").upper()
+                    name       = act.get("tracked_user", "?")
+                    title      = str(act.get("title", act.get("question", "Bilinmiyor")))[:60]
+                    token_id   = act.get("tokenId", act.get("conditionId", ""))
+                    outcome_i  = act.get("outcomeIndex", 1)
+                    outcome    = "YES" if outcome_i == 1 else "NO"
 
-                    # Her 3 taramada bir pozisyonları kontrol et
-                    if app_state["scan_count"] % 3 == 0:
-                        await check_closed_positions(portfolio, notifier)
+                    try:
+                        price = float(act.get("price", 0.5))
+                        price = min(max(price, 0.01), 0.99)
+                    except:
+                        price = 0.5
 
-                    # Gerçek modda bakiye senkronize et (her 10 taramada)
-                    if app_state["scan_count"] % 10 == 0 and not Config.TEST_MODE and poly.client:
-                        poly.sync_portfolio_balance(portfolio)
+                    # Aynı market için tek pozisyon — conditionId bazlı
+                    condition_id_short = str(act.get("conditionId", token_id))[:20]
+                    pos_id = f"{act.get('tracked_wallet','')[:8]}_{condition_id_short}_{outcome}"
 
-                    for act in trades:
-                        side      = act.get("side", "").upper()
-                        name      = act.get("tracked_user", "?")
-                        title     = str(act.get("title", act.get("question", "Bilinmiyor")))[:60]
-                        token_id  = act.get("tokenId", act.get("conditionId", ""))
-                        outcome_i = act.get("outcomeIndex", 0)
-                        outcome   = "YES" if outcome_i == 0 else "NO"
+                    if side == "BUY":
+                        # ===== KARA LISTE KONTROLU =====
+                        raw_title = act.get("title")
+                        if raw_title is None or raw_title == "":
+                            raw_title = act.get("question")
+                        if raw_title is None or raw_title == "":
+                            raw_title = act.get("marketTitle")
+                        if raw_title is None or raw_title == "":
+                            raw_title = act.get("slug", "").replace("-", " ")
+                        title = str(raw_title).strip()[:120] if raw_title else ""
 
-                        # FIX: tracked_wallet kullan
-                        trader_wallet = act.get("tracked_wallet", "").lower()
-                        active_notifier = notifier2 if trader_wallet in TRADERS_BOT2 else notifier
+                        logging.info(f"RAW ACT: conditionId={act.get('conditionId','YOK')} tokenId={act.get('tokenId','YOK')} title={act.get('title','YOK')} outcome={act.get('outcomeIndex','YOK')} trader={act.get('tracked_user','?')}")
+                        logging.info(f"BLACKLIST CHECK: title='{title}'")
 
-                        try:
-                            price = float(act.get("price", 0.5))
-                            price = min(max(price, 0.01), 0.99)
-                        except:
-                            price = 0.5
-
-                        if price < 0.05:
-                            logging.info(f"Cok ucuz market atlaniyor: fiyat=${price:.3f}")
+                        if not title:
+                            logging.warning("Bos title, atlaniyor")
                             continue
 
-                        condition_id_short = str(act.get("conditionId", token_id))[:20]
-                        pos_id = f"{act.get('tracked_wallet','')[:8]}_{condition_id_short}_{outcome}"
+                        title_lower = title.lower()
+                        blacklisted = False
+                        for banned in Config.BLACKLIST_MARKETS:
+                            if banned in title_lower:
+                                logging.info(f"KARA LISTE (title): '{banned}' bulundu: '{title}'")
+                                blacklisted = True
+                                break
+                        if blacklisted:
+                            continue
 
-                        if side == "BUY":
-                            # ===== KARA LISTE KONTROLU =====
-                            raw_title = act.get("title")
-                            if raw_title is None or raw_title == "":
-                                raw_title = act.get("question")
-                            if raw_title is None or raw_title == "":
-                                raw_title = act.get("marketTitle")
-                            if raw_title is None or raw_title == "":
-                                raw_title = act.get("slug", "").replace("-", " ")
-                            title = str(raw_title).strip()[:120] if raw_title else ""
+                        slug = str(act.get("slug", "")).lower()
+                        for banned in Config.BLACKLIST_MARKETS:
+                            if banned in slug:
+                                logging.info(f"KARA LISTE (slug): '{banned}' bulundu")
+                                blacklisted = True
+                                break
+                        if blacklisted:
+                            continue
 
-                            logging.info(f"RAW ACT: conditionId={act.get('conditionId','YOK')} tokenId={act.get('tokenId','YOK')} title={act.get('title','YOK')} outcome={act.get('outcomeIndex','YOK')} trader={act.get('tracked_user','?')}")
-                            logging.info(f"BLACKLIST CHECK: title='{title}'")
+                        actual_token_id = act.get("tokenId", "")
+                        actual_condition_id = act.get("conditionId", "")
+                        if actual_token_id and actual_token_id in Config.BLACKLIST_TOKEN_IDS:
+                            logging.info("KARA LISTE (tokenId)")
+                            continue
+                        if actual_condition_id and actual_condition_id in Config.BLACKLIST_TOKEN_IDS:
+                            logging.info("KARA LISTE (conditionId in tokenIds)")
+                            continue
+                        if actual_condition_id and actual_condition_id in Config.BLACKLIST_CONDITION_IDS:
+                            logging.info(f"KARA LISTE (conditionId): {actual_condition_id[:20]}")
+                            continue
+                        # ===== KARA LISTE SONU =====
 
-                            if not title:
-                                logging.warning("Bos title, atlaniyor")
-                                continue
+                        if pos_id in portfolio.open_positions:
+                            continue
+                        # Ayni conditionId icin sadece 1 pozisyon
+                        condition_key = act.get("conditionId", "")
+                        if condition_key and condition_key in app_state["seen_conditions"]:
+                            logging.debug(f"Ayni conditionId zaten islendi, atlaniyor")
+                            continue
+                        if condition_key:
+                            app_state["seen_conditions"].add(condition_key)
+                        # Maksimum 4 açık pozisyon
+                        # Limit yok
 
-                            title_lower = title.lower()
-                            blacklisted = False
-                            for banned in Config.BLACKLIST_MARKETS:
-                                if banned in title_lower:
-                                    logging.info(f"KARA LISTE (title): '{banned}' bulundu: '{title}'")
-                                    blacklisted = True
-                                    break
-                            if blacklisted:
-                                continue
+                        # Gerçek bakiyeyi kontrol et
+                        real_cash = poly.get_real_balance() if not Config.TEST_MODE else portfolio.cash
+                        if real_cash < Config.MIN_CASH:
+                            if not app_state["no_cash_notified"]:
+                                await notifier.send(f"[NAKİT YETERSİZ] Gercek bakiye: ${real_cash:.2f}")
+                                app_state["no_cash_notified"] = True
+                            continue
+                        app_state["no_cash_notified"] = False
 
-                            slug = str(act.get("slug", "")).lower()
-                            for banned in Config.BLACKLIST_MARKETS:
-                                if banned in slug:
-                                    logging.info(f"KARA LISTE (slug): '{banned}' bulundu")
-                                    blacklisted = True
-                                    break
-                            if blacklisted:
-                                continue
+                        # Direkt asset ID kullan (conditionId yerine)
+                        direct_token = act.get("asset", "")
+                        if direct_token:
+                            token_id = direct_token
+                            logging.info(f"Direkt asset kullaniliyor: {token_id[:20]}...")
+                        # Her zaman sabit TRADE_SIZE kullan (min 5 dolar)
+                        trade_amount = float(Config.TRADE_SIZE)
+                        result = poly.buy(token_id, outcome_i, price, trade_amount)
 
-                            actual_token_id = act.get("tokenId", "")
-                            actual_condition_id = act.get("conditionId", "")
-                            if actual_token_id and actual_token_id in Config.BLACKLIST_TOKEN_IDS:
-                                logging.info("KARA LISTE (tokenId)")
-                                continue
-                            if actual_condition_id and actual_condition_id in Config.BLACKLIST_TOKEN_IDS:
-                                logging.info("KARA LISTE (conditionId in tokenIds)")
-                                continue
-                            if actual_condition_id and actual_condition_id in Config.BLACKLIST_CONDITION_IDS:
-                                logging.info(f"KARA LISTE (conditionId): {actual_condition_id[:20]}")
-                                continue
-                            # ===== KARA LISTE SONU =====
+                        if result is not None:
+                            pos = Position(
+                                position_id=pos_id,
+                                trader_name=name,
+                                market_title=title,
+                                token_id=token_id,
+                                side=outcome,
+                                entry_price=Decimal(str(price)),
+                                size_usd=Config.TRADE_SIZE,
+                            )
+                            portfolio.open_positions[pos_id] = pos
+                            portfolio.total_trades += 1
 
-                            if pos_id in portfolio.open_positions:
-                                continue
-
-                            condition_key = act.get("conditionId", "")
-                            if condition_key and condition_key in app_state["seen_conditions"]:
-                                logging.debug(f"Ayni conditionId zaten islendi, atlaniyor")
-                                continue
-                            if condition_key:
-                                app_state["seen_conditions"].add(condition_key)
-
-                            real_cash = poly.get_real_balance() if not Config.TEST_MODE else portfolio.cash
-                            if real_cash < Config.MIN_CASH:
-                                if not app_state["no_cash_notified"]:
-                                    await notifier.send(f"[NAKİT YETERSİZ] Gercek bakiye: ${real_cash:.2f}")
-                                    app_state["no_cash_notified"] = True
-                                continue
-                            app_state["no_cash_notified"] = False
-
-                            condition_id = act.get("conditionId", "")
-                            direct_asset = act.get("asset", "")
-                            token_id = direct_asset
-
-                            if condition_id:
-                                try:
-                                    import requests as req_clob
-                                    clob_r = req_clob.get(
-                                        f"https://clob.polymarket.com/markets/{condition_id}",
-                                        timeout=5
-                                    )
-                                    if clob_r.status_code == 200:
-                                        clob_data = clob_r.json()
-                                        tokens = clob_data.get("tokens", [])
-                                        if len(tokens) > outcome_i:
-                                            token_id = tokens[outcome_i].get("token_id", direct_asset)
-                                            logging.info(f"CLOB token: outcome={outcome_i} ({outcome}) token={token_id[:20]}...")
-                                        else:
-                                            logging.warning(f"CLOB token bulunamadi, asset kullaniliyor")
-                                    else:
-                                        import json as json_mod
-                                        g = req_clob.get(
-                                            f"https://gamma-api.polymarket.com/markets?conditionId={condition_id}",
-                                            timeout=5
-                                        )
-                                        if g.status_code == 200 and g.json():
-                                            mkt = g.json()[0] if isinstance(g.json(), list) else g.json()
-                                            clob_ids = mkt.get("clobTokenIds", "[]")
-                                            if isinstance(clob_ids, str):
-                                                clob_ids = json_mod.loads(clob_ids)
-                                            if len(clob_ids) > outcome_i:
-                                                token_id = clob_ids[outcome_i]
-                                                logging.info(f"Gamma token: outcome={outcome_i} ({outcome}) token={token_id[:20]}...")
-                                except Exception as token_err:
-                                    logging.warning(f"Token hatasi: {token_err}, asset kullaniliyor")
-
-                            logging.info(f"Final token: {token_id[:20] if token_id else 'YOK'}... outcome={outcome_i} ({outcome})")
-                            trade_amount = float(Config.TRADE_SIZE)
-                            logging.info(f"Trade boyutu: ${trade_amount:.2f} (sabit TRADE_SIZE)")
-                            result = poly.buy(token_id, outcome_i, price, trade_amount)
-
-                            if result is not None:
-                                pos = Position(
-                                    position_id=pos_id,
-                                    trader_name=name,
-                                    market_title=title,
-                                    token_id=token_id,
-                                    side=outcome,
-                                    entry_price=Decimal(str(price)),
-                                    size_usd=Config.TRADE_SIZE,
-                                )
-                                portfolio.open_positions[pos_id] = pos
-                                portfolio.total_trades += 1
-
-                                if not Config.TEST_MODE:
-                                    portfolio.cash = poly.get_real_balance()
-                                else:
-                                    commission = Config.TRADE_SIZE * Decimal("0.02")
-                                    portfolio.cash -= (Config.TRADE_SIZE + commission)
-                                    save_portfolio(portfolio)
-
-                                sign = "+" if portfolio.total_pnl >= 0 else ""
-                                await active_notifier.send(
-                                    f"{'[TEST] ' if Config.TEST_MODE else ''}POZİSYON AÇILDI\n\n"
-                                    f"Trader: *{name}*\n"
-                                    f"Market: {title}\n"
-                                    f"Yön: *{outcome}*\n"
-                                    f"Fiyat: ${price:.3f}\n"
-                                    f"Boyut: ${Config.TRADE_SIZE}\n\n"
-                                    f"Gercek Nakit: ${portfolio.cash:.2f}\n"
-                                    f"PnL: {sign}${portfolio.total_pnl:.2f}"
-                                )
-
-                        elif side == "SELL":
-                            if pos_id not in portfolio.open_positions:
-                                continue
-                            pos = portfolio.open_positions[pos_id]
-
-                            result = poly.sell(token_id, outcome_i, price, float(pos.size_usd))
-
-                            if result is not None:
-                                shares = pos.size_usd / pos.entry_price
-                                pnl = shares * (Decimal(str(price)) - pos.entry_price)
-                                portfolio.realized_pnl += pnl
-                                if pnl >= 0:
-                                    portfolio.winning_trades += 1
-                                else:
-                                    portfolio.losing_trades += 1
-
-                                app_state["trade_history"].insert(0, {
-                                    "time":   datetime.now().strftime("%H:%M"),
-                                    "trader": pos.trader_name,
-                                    "market": pos.market_title,
-                                    "side":   pos.side,
-                                    "entry":  float(pos.entry_price),
-                                    "exit":   price,
-                                    "pnl":    float(pnl),
-                                })
-                                del portfolio.open_positions[pos_id]
-
-                                if not Config.TEST_MODE:
-                                    portfolio.cash = poly.get_real_balance()
-                                else:
-                                    portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))
-                                    save_portfolio(portfolio)
-
-                                ts = "+" if pnl >= 0 else ""
-                                wr = (portfolio.winning_trades / portfolio.total_trades * 100) if portfolio.total_trades > 0 else 0
-                                await active_notifier.send(
-                                    f"{'[TEST] ' if Config.TEST_MODE else ''}POZİSYON KAPANDI\n\n"
-                                    f"Trader: *{pos.trader_name}*\n"
-                                    f"Market: {pos.market_title}\n"
-                                    f"PnL: {ts}${abs(float(pnl)):.2f}\n\n"
-                                    f"Gercek Nakit: ${portfolio.cash:.2f}\n"
-                                    f"Win Rate: {wr:.0f}% ({portfolio.winning_trades}W/{portfolio.losing_trades}L)"
-                                )
-
-            # STOP-LOSS devre disi
-            if False:
-                pass
-
-            # seen_tx kaydet (her 5 taramada bir)
-            if app_state["scan_count"] % 5 == 0:
-                save_seen_tx(tracker.seen_tx)
-
-            # 20 taramada bir rapor
-            if app_state["scan_count"] % 20 == 0:
-                async with TelegramNotifier() as notifier:
-                    import requests as req_report
-                    live_value = Decimal("0")
-                    checked = {}
-                    for pos in portfolio.open_positions.values():
-                        try:
-                            if pos.token_id in checked:
-                                cur = checked[pos.token_id]
+                            # Gerçek bakiyeyi çek
+                            if not Config.TEST_MODE:
+                                portfolio.cash = poly.get_real_balance()
                             else:
-                                r = req_report.get(f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}", timeout=3)
-                                cur = float(r.json().get("price", float(pos.entry_price))) if r.status_code == 200 else float(pos.entry_price)
-                                checked[pos.token_id] = cur
-                            live_value += pos.size_usd / pos.entry_price * Decimal(str(cur))
+                                portfolio.cash -= Config.TRADE_SIZE
+
+                            sign = "+" if portfolio.total_pnl >= 0 else ""
+                            await notifier.send(
+                                f"{'[TEST] ' if Config.TEST_MODE else ''}POZİSYON AÇILDI\n\n"
+                                f"Trader: *{name}*\n"
+                                f"Market: {title}\n"
+                                f"Yön: *{outcome}*\n"
+                                f"Fiyat: ${price:.3f}\n"
+                                f"Boyut: ${Config.TRADE_SIZE}\n\n"
+                                f"Gercek Nakit: ${portfolio.cash:.2f}\n"
+                                f"PnL: {sign}${portfolio.total_pnl:.2f}"
+                            )
+
+                    elif side == "SELL":
+                        if pos_id not in portfolio.open_positions:
+                            continue
+                        pos = portfolio.open_positions[pos_id]
+
+                        result = poly.sell(token_id, outcome_i, price, float(pos.size_usd))
+
+                        if result is not None:
+                            shares = pos.size_usd / pos.entry_price
+                            pnl = shares * (Decimal(str(price)) - pos.entry_price)
+                            portfolio.realized_pnl += pnl
+                            if pnl >= 0:
+                                portfolio.winning_trades += 1
+                            else:
+                                portfolio.losing_trades += 1
+
+                            app_state["trade_history"].insert(0, {
+                                "time":    datetime.now().strftime("%H:%M"),
+                                "trader":  pos.trader_name,
+                                "market":  pos.market_title,
+                                "side":    pos.side,
+                                "entry":   float(pos.entry_price),
+                                "exit":    price,
+                                "pnl":     float(pnl),
+                            })
+                            del portfolio.open_positions[pos_id]
+
+                            # Gerçek bakiyeyi çek
+                            if not Config.TEST_MODE:
+                                portfolio.cash = poly.get_real_balance()
+                            else:
+                                portfolio.cash += pos.size_usd + pnl
+
+                            ts = "+" if pnl >= 0 else ""
+                            wr = (portfolio.winning_trades / portfolio.total_trades * 100) if portfolio.total_trades > 0 else 0
+                            emoji = "✅" if pnl >= 0 else "❌"
+                            await notifier.send(
+                                f"{'[TEST] ' if Config.TEST_MODE else ''}{emoji} POZİSYON KAPANDI\n\n"
+                                f"👤 Trader: *{pos.trader_name}*\n"
+                                f"📌 Market: {pos.market_title}\n"
+                                f"📊 Yon: {pos.side}\n"
+                                f"💰 PnL: {ts}${abs(float(pnl)):.2f}\n\n"
+                                f"💵 Nakit: ${portfolio.cash:.2f}\n"
+                                f"🎯 Win Rate: {wr:.0f}% ({portfolio.winning_trades}W/{portfolio.losing_trades}L)"
+                            )
+
+            # 30 taramada bir rapor (yaklasik 30 dakika)
+            if app_state["scan_count"] % 30 == 0 and app_state["scan_count"] > 0:
+                async with TelegramNotifier() as notifier:
+                    # Gercek bakiye
+                    real_cash = portfolio.cash
+                    if poly and poly.client and not Config.TEST_MODE:
+                        try:
+                            real_cash = poly.get_real_balance()
                         except:
-                            live_value += pos.size_usd
+                            pass
 
-                    live_total = portfolio.cash + live_value
-                    live_pnl = live_total - portfolio.initial_capital
-                    sign = "+" if live_pnl >= 0 else ""
+                    # Gercek pozisyon degeri
+                    real_open_value = Decimal("0")
+                    real_open_count = 0
+                    try:
+                        import requests as req
+                        url = f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0"
+                        resp = req.get(url, timeout=5)
+                        if resp.status_code == 200:
+                            positions = resp.json()
+                            real_open_count = len(positions) if isinstance(positions, list) else 0
+                            real_open_value = Decimal(str(sum(float(p.get("value", 0) or 0) for p in (positions if isinstance(positions, list) else []))))
+                    except:
+                        pass
 
-                    # Trader bazında istatistik - açık pozisyonlar
+                    total = real_cash + real_open_value
+                    pnl = total - portfolio.initial_capital
+                    sign = "+" if pnl >= 0 else ""
+
+                    # Trader bazli ozet
                     trader_stats = {}
                     for pos in portfolio.open_positions.values():
                         t = pos.trader_name
                         if t not in trader_stats:
                             trader_stats[t] = {"count": 0, "value": Decimal("0"), "pnl": Decimal("0")}
                         trader_stats[t]["count"] += 1
-                        try:
-                            cur_price = checked.get(pos.token_id)
-                            if cur_price is None:
-                                r2 = req_report.get(f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}", timeout=3)
-                                cur_price = float(r2.json().get("price", float(pos.entry_price))) if r2.status_code == 200 else float(pos.entry_price)
-                            pos_value = pos.size_usd / pos.entry_price * Decimal(str(cur_price))
-                            pos_pnl = pos_value - pos.size_usd
-                            trader_stats[t]["value"] += pos_value
-                            trader_stats[t]["pnl"] += pos_pnl
-                        except:
-                            trader_stats[t]["value"] += pos.size_usd
+                        trader_stats[t]["value"] += pos.size_usd
 
-                    # FIX: Kapanan işlemlerin realized PnL'ini de ekle
-                    for h in app_state["trade_history"]:
-                        t = h.get("trader", "")
-                        if not t:
-                            continue
-                        if t not in trader_stats:
-                            trader_stats[t] = {"count": 0, "value": Decimal("0"), "pnl": Decimal("0")}
-                        trader_stats[t]["pnl"] += Decimal(str(h.get("pnl", 0)))
+                    # Gercek pozisyon PnL hesapla
+                    real_pos_map = {}
+                    try:
+                        import requests as req2
+                        url2 = f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0"
+                        resp2 = req2.get(url2, timeout=5)
+                        if resp2.status_code == 200:
+                            for p in resp2.json():
+                                title_key = str(p.get("title", ""))[:40]
+                                real_pos_map[title_key] = {
+                                    "value": float(p.get("value", 0) or 0),
+                                    "pnl": float(p.get("pnl", 0) or 0),
+                                }
+                    except:
+                        pass
 
                     trader_lines = ""
-                    for t, s in sorted(trader_stats.items(), key=lambda x: x[1]["pnl"], reverse=True):
-                        sign2 = "+" if s["pnl"] >= 0 else ""
-                        trader_lines += f"👤 {t}: {s['count']} işlem | ${float(s['value']):.0f} | {sign2}${float(s['pnl']):.2f}\n"
+                    for tname, stats in sorted(trader_stats.items(), key=lambda x: -x[1]["count"]):
+                        trader_lines += f"\n👤 {tname}: {stats['count']} islem | ${stats['value']:.0f}"
 
-                    await notifier.send(
-                        f"📊 RAPOR Tarama #{app_state['scan_count']}\n"
-                        f"💰 Nakit: ${portfolio.cash:.2f}\n"
-                        f"📦 Pozisyon Değeri: ${live_value:.2f}\n"
-                        f"📊 Toplam: ${live_total:.2f}\n"
-                        f"📈 PnL: {sign}${live_pnl:.2f} ({sign}{float(live_pnl/portfolio.initial_capital*100):.1f}%)\n"
-                        f"📌 Açık: {len(portfolio.open_positions)} | Trade: {portfolio.total_trades}\n"
-                        f"━━━━━━━━━━━━━━\n"
-                        f"{trader_lines}"
+                    # Acik pozisyon detaylari (trader ismiyle)
+                    pos_lines = ""
+                    for pos in list(portfolio.open_positions.values())[:15]:
+                        title_key = pos.market_title[:40]
+                        real_val = real_pos_map.get(title_key, {})
+                        val = real_val.get("value", float(pos.size_usd))
+                        pnl_pos = real_val.get("pnl", 0)
+                        pnl_sign = "+" if pnl_pos >= 0 else ""
+                        pos_lines += f"\n• [{pos.trader_name}] {pos.market_title[:25]}... {pos.side} | ${val:.2f} ({pnl_sign}${pnl_pos:.2f})"
+
+                    msg = (
+                        f"📊 RAPOR - Tarama #{app_state['scan_count']}\n"
+                        f"💵 Nakit: ${real_cash:.2f}\n"
+                        f"📦 Pozisyon Degeri: ${real_open_value:.2f}\n"
+                        f"💰 Toplam: ${total:.2f}\n"
+                        f"📈 PnL: {sign}${pnl:.2f}\n"
+                        f"🔓 Acik: {real_open_count} | Trade: {portfolio.total_trades}"
                     )
+                    if trader_lines:
+                        msg += f"\n\n👥 TRADER OZETI:{trader_lines}"
+                    if pos_lines:
+                        msg += f"\n\n📋 ACIK POZISYONLAR:{pos_lines}"
+                    await notifier.send(msg)
 
         except Exception as e:
             logging.error(f"Scan hatasi: {e}")
@@ -1180,38 +834,11 @@ def index():
 
 @flask_app.route("/api/status")
 def status():
-    portfolio = app_state["portfolio"]
-    poly = app_state.get("poly_client")
-
-    real_cash = float(portfolio.cash)
-    if poly and poly.client and not Config.TEST_MODE:
-        try:
-            real_cash = float(poly.get_real_balance())
-            portfolio.cash = Decimal(str(real_cash))
-        except:
-            pass
-
-    real_positions = []
-    try:
-        import requests
-        url = f"https://data-api.polymarket.com/positions?user={Config.DEPOSIT_WALLET}&sizeThreshold=0"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            real_positions = data if isinstance(data, list) else []
-    except:
-        pass
-
-    portfolio_dict = portfolio.to_dict()
-    portfolio_dict["cash"] = real_cash
-    portfolio_dict["real_positions_count"] = len(real_positions)
-    portfolio_dict["real_positions_value"] = sum(float(p.get("value", 0) or 0) for p in real_positions)
-
     return jsonify({
         "running":       app_state["running"],
         "scan_count":    app_state["scan_count"],
         "test_mode":     Config.TEST_MODE,
-        "portfolio":     portfolio_dict,
+        "portfolio":     app_state["portfolio"].to_dict(),
         "tracked_users": app_state["tracked_users"],
     })
 
@@ -1232,24 +859,6 @@ def stop():
     app_state["running"] = False
     return jsonify({"ok": True, "msg": "Bot durduruldu"})
 
-def save_traders():
-    import json
-    try:
-        with open("traders.json", "w") as f:
-            json.dump(app_state["tracked_users"], f, indent=2)
-    except Exception as e:
-        logging.error(f"Trader kayit hatasi: {e}")
-
-def load_traders():
-    import json
-    try:
-        if os.path.exists("traders.json"):
-            with open("traders.json") as f:
-                return json.load(f)
-    except Exception as e:
-        logging.error(f"Trader yukle hatasi: {e}")
-    return list(Config.TRACKED_USERS)
-
 @flask_app.route("/api/traders", methods=["POST"])
 def add_trader():
     data   = request.json or {}
@@ -1257,70 +866,13 @@ def add_trader():
     wallet = data.get("wallet", "").strip().lower()
     if not name or not wallet:
         return jsonify({"ok": False, "msg": "Isim ve cuzdan gerekli"})
-    if any(u["wallet"] == wallet for u in app_state["tracked_users"]):
-        return jsonify({"ok": False, "msg": "Bu trader zaten listede"})
     app_state["tracked_users"].append({"name": name, "wallet": wallet})
-    save_traders()
     return jsonify({"ok": True, "msg": f"{name} eklendi"})
 
 @flask_app.route("/api/traders/<wallet>", methods=["DELETE"])
 def del_trader(wallet):
     app_state["tracked_users"] = [u for u in app_state["tracked_users"] if u["wallet"] != wallet]
-    save_traders()
     return jsonify({"ok": True, "msg": "Trader silindi"})
-
-@flask_app.route("/api/close-all", methods=["POST"])
-def close_all_positions():
-    portfolio = app_state["portfolio"]
-    if not portfolio.open_positions:
-        return jsonify({"ok": False, "msg": "Açık pozisyon yok"})
-    count = len(portfolio.open_positions)
-    import requests as req
-    for pos_id, pos in list(portfolio.open_positions.items()):
-        try:
-            url = f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}"
-            resp = req.get(url, timeout=5)
-            if resp.status_code == 200:
-                current_price = float(resp.json().get("price", float(pos.entry_price)))
-            else:
-                current_price = float(pos.entry_price)
-        except:
-            current_price = float(pos.entry_price)
-        pnl = pos.size_usd / pos.entry_price * (Decimal(str(current_price)) - pos.entry_price)
-        portfolio.cash += pos.size_usd + pnl - (pos.size_usd * Decimal("0.02"))
-        portfolio.realized_pnl += pnl
-        if pnl >= 0:
-            portfolio.winning_trades += 1
-        else:
-            portfolio.losing_trades += 1
-        del portfolio.open_positions[pos_id]
-    save_portfolio(portfolio)
-    msg = f"{count} pozisyon kapatıldı"
-    logging.info(msg)
-    return jsonify({"ok": True, "msg": msg, "count": count})
-
-@flask_app.route("/api/cancel-all", methods=["POST"])
-def cancel_all():
-    poly = app_state.get("poly_client")
-    if not poly:
-        poly = PolymarketClient()
-    result = poly.cancel_all_orders()
-    if "error" in result:
-        return jsonify({"ok": False, "msg": result["error"]})
-    cancelled = result.get("cancelled", 0)
-    test_suffix = " (TEST)" if result.get("test") else ""
-    msg = f"{cancelled} adet emir iptal edildi{test_suffix}"
-    logging.info(msg)
-    async def _notify():
-        async with TelegramNotifier() as n:
-            await n.send(f"🚫 TÜM EMİRLER İPTAL EDİLDİ\n{cancelled} emir iptal edildi{test_suffix}")
-    try:
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(_notify())
-        loop.close()
-    except Exception as e:
-        logging.warning(f"Telegram bildirim hatasi: {e}")
-    return jsonify({"ok": True, "msg": msg, "cancelled": cancelled})
 
 if __name__ == "__main__":
     logging.basicConfig(
@@ -1338,7 +890,8 @@ if __name__ == "__main__":
     print(f"  Telegram: {'OK' if Config.TELEGRAM_TOKEN else 'EKSIK'}")
     print(f"  Mod: {'TEST' if Config.TEST_MODE else 'GERCEK'}")
     print("=" * 50)
-    t = threading.Thread(target=start_bot_thread, daemon=True)
-    t.start()
+    if os.environ.get("RAILWAY_ENVIRONMENT"):
+        t = threading.Thread(target=start_bot_thread, daemon=True)
+        t.start()
     port = int(os.environ.get("PORT", 5000))
-    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False, threaded=True)
+    flask_app.run(host="0.0.0.0", port=port, debug=False)
