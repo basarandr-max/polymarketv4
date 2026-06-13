@@ -23,6 +23,11 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
 from flask import Flask, jsonify, request, send_from_directory
+try:
+    from flask_cors import CORS
+    _CORS_AVAILABLE = True
+except ImportError:
+    _CORS_AVAILABLE = False
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -923,6 +928,15 @@ def start_bot_thread():
 
 # ==================== FLASK ====================
 flask_app = Flask(__name__, static_folder=".")
+if _CORS_AVAILABLE:
+    CORS(flask_app)
+else:
+    @flask_app.after_request
+    def add_cors(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,DELETE,OPTIONS"
+        return response
 
 @flask_app.route("/")
 def index():
