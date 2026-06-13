@@ -117,7 +117,24 @@ async function load() {
     const r = await fetch(API + '/api/status');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
-    positions = d.portfolio.open_positions || [];
+
+    // Fiyatlari ayri endpoint'ten cek
+    let prices = {};
+    try {
+      const pr = await fetch(API + '/api/position-prices');
+      if (pr.ok) prices = await pr.json();
+    } catch(e) {}
+
+    // Fiyatlari pozisyonlara ekle
+    positions = (d.portfolio.open_positions || []).map(function(p) {
+      const pd = prices[p.position_id];
+      return Object.assign({}, p, {
+        current_price: pd ? pd.current_price : null,
+        estimated_pnl: pd ? pd.estimated_pnl : null,
+        pnl_pct:       pd ? pd.pnl_pct       : null,
+      });
+    });
+
     renderStats(d);
     renderPositions(positions);
   } catch(e) {
