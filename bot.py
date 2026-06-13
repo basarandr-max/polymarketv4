@@ -29,6 +29,7 @@ try:
 except ImportError:
     _CORS_AVAILABLE = False
 from dotenv import load_dotenv
+import requests as sync_requests
 
 load_dotenv()
 
@@ -951,6 +952,37 @@ def index():
 def api_status():
     portfolio = app_state["portfolio"]
     d = portfolio.to_dict()
+    # Anlık fiyatları ekle
+    for pos_dict in d.get("open_positions", []):
+        token_id = pos_dict.get("token_id", "")
+        if not token_id:
+            pos_dict["current_price"] = None
+            pos_dict["estimated_pnl"] = None
+            pos_dict["pnl_pct"] = None
+            continue
+        try:
+            resp = sync_requests.get(
+                f"{Config.CLOB_HOST}/last-trade-price?token_id={token_id}",
+                timeout=3
+            )
+            if resp.status_code == 200:
+                price = float(resp.json().get("price", 0))
+                entry = float(pos_dict.get("entry_price", 0))
+                size  = float(pos_dict.get("size_usd", 0))
+                side  = pos_dict.get("side", "YES")
+                shares = size / entry if entry > 0 else 0
+                pnl = shares * (price - entry) if side == "YES" else shares * ((1 - price) - entry)
+                pos_dict["current_price"] = round(price, 4)
+                pos_dict["estimated_pnl"] = round(pnl, 2)
+                pos_dict["pnl_pct"] = round((pnl / size * 100) if size > 0 else 0, 1)
+            else:
+                pos_dict["current_price"] = None
+                pos_dict["estimated_pnl"] = None
+                pos_dict["pnl_pct"] = None
+        except Exception:
+            pos_dict["current_price"] = None
+            pos_dict["estimated_pnl"] = None
+            pos_dict["pnl_pct"] = None
     return jsonify({
         "running":       app_state["running"],
         "scan_count":    app_state["scan_count"],
