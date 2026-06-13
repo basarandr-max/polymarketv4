@@ -948,40 +948,8 @@ def index():
 
 @flask_app.route("/api/status")
 def api_status():
-    import requests as req
     portfolio = app_state["portfolio"]
     d = portfolio.to_dict()
-
-    # Her pozisyon için anlık fiyat ekle
-    positions = d.get("open_positions", [])
-    for pos in positions:
-        token_id = pos.get("token_id", "")
-        if not token_id:
-            pos["current_price"] = None
-            continue
-        try:
-            r = req.get(
-                f"https://clob.polymarket.com/last-trade-price?token_id={token_id}",
-                timeout=3
-            )
-            if r.status_code == 200:
-                price = float(r.json().get("price", 0))
-                pos["current_price"] = price
-                # Tahmini PnL hesapla
-                entry = float(pos.get("entry_price", 0))
-                size  = float(pos.get("size_usd", 0))
-                if entry > 0:
-                    pnl = (size / entry) * (price - entry)
-                    pos["estimated_pnl"] = round(pnl, 2)
-                    pos["pnl_pct"] = round((price - entry) / entry * 100, 1)
-                else:
-                    pos["estimated_pnl"] = 0
-                    pos["pnl_pct"] = 0
-            else:
-                pos["current_price"] = None
-        except Exception:
-            pos["current_price"] = None
-
     return jsonify({
         "running":       app_state["running"],
         "scan_count":    app_state["scan_count"],
@@ -989,6 +957,37 @@ def api_status():
         "portfolio":     d,
         "tracked_users": app_state["tracked_users"],
     })
+
+@flask_app.route("/api/position-prices")
+def api_position_prices():
+    """Her pozisyon icin anlik fiyat, PnL ve pnl_pct dondur"""
+    portfolio = app_state["portfolio"]
+    result    = {}
+    for pos_id, pos in list(portfolio.open_positions.items()):
+        if not pos.token_id:
+            continue
+        try:
+            resp = sync_requests.get(
+                f"{Config.CLOB_HOST}/last-trade-price?token_id={pos.token_id}",
+                timeout=3
+            )
+            if resp.status_code == 200:
+                price = float(resp.json().get("price", float(pos.entry_price)))
+                entry = float(pos.entry_price)
+                size  = float(pos.size_usd)
+                shares = size / entry if entry > 0 else 0
+                if pos.side == "YES":
+                    pnl = shares * (price - entry)
+                else:
+                    pnl = shares * ((1 - price) - entry)
+                result[pos_id] = {
+                    "current_price": round(price, 4),
+                    "estimated_pnl": round(pnl, 2),
+                    "pnl_pct":       round((pnl / size * 100) if size > 0 else 0, 1),
+                }
+        except Exception as e:
+            logging.error(f"Fiyat cekme hatasi {pos_id}: {e}")
+    return jsonify(result)
 
 @flask_app.route("/api/history")
 def api_history():
