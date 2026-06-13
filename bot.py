@@ -191,6 +191,7 @@ class Position:
             "position_id":   self.position_id,
             "trader_name":   self.trader_name,
             "market_title":  self.market_title,
+            "token_id":      self.token_id,
             "side":          self.side,
             "outcome_index": self.outcome_index,
             "entry_price":   float(self.entry_price),
