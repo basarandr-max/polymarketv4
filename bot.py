@@ -996,6 +996,25 @@ def api_del_trader(wallet):
     save_traders(app_state["tracked_users"])
     return jsonify({"ok": True, "msg": "Trader silindi"})
 
+@flask_app.route("/api/prices", methods=["POST"])
+def api_prices():
+    """Token ID listesi alır, anlık fiyatları döner"""
+    import requests as req
+    data      = request.json or {}
+    token_ids = data.get("token_ids", [])
+    prices    = {}
+    for tid in token_ids[:30]:
+        try:
+            r = req.get(
+                f"https://clob.polymarket.com/last-trade-price?token_id={tid}",
+                timeout=5
+            )
+            if r.status_code == 200:
+                prices[tid] = float(r.json().get("price", 0))
+        except Exception:
+            prices[tid] = None
+    return jsonify({"prices": prices})
+
 @flask_app.route("/api/close-position", methods=["POST"])
 def api_close_position():
     import requests as req
