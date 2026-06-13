@@ -198,17 +198,21 @@ function renderPositions(pos) {
 }
 
 async function fetchAllPrices(pos) {
-  for (let i = 0; i < pos.length; i++) {
-    const p = pos[i];
-    if (!p.token_id) continue;
-    try {
-      const r = await fetch(
-        'https://clob.polymarket.com/last-trade-price?token_id=' + p.token_id,
-        { mode: 'cors' }
-      );
-      if (!r.ok) continue;
-      const d     = await r.json();
-      const price = parseFloat(d.price || p.entry_price);
+  if (!pos || pos.length === 0) return;
+  const token_ids = pos.map(p => p.token_id).filter(Boolean);
+  if (token_ids.length === 0) return;
+  try {
+    const r = await fetch(API + '/api/prices', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({token_ids})
+    });
+    if (!r.ok) return;
+    const d      = await r.json();
+    const prices = d.prices || {};
+    pos.forEach((p, i) => {
+      const price = prices[p.token_id];
+      if (price === undefined || price === null) return;
       const entry = parseFloat(p.entry_price);
       const size  = parseFloat(p.size_usd);
       const pnl   = (size / entry) * (price - entry);
@@ -222,11 +226,9 @@ async function fetchAllPrices(pos) {
         pnlEl.textContent = `${sign}$${Math.abs(pnl).toFixed(2)} (${sign}${pct.toFixed(1)}%)`;
         pnlEl.className = 'pnl-val ' + cls;
       }
-    } catch(e) {
-      const curEl = document.getElementById('cur-' + i);
-      if (curEl) curEl.innerHTML = `<div class="plabel">Güncel</div><div class="pval loading">-</div>`;
-    }
-    await new Promise(r => setTimeout(r, 200));
+    });
+  } catch(e) {
+    console.error('Fiyat cekme hatasi:', e);
   }
 }
 
