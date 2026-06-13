@@ -2,7 +2,6 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://clob.polymarket.com;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Polymarket Bot</title>
 <style>
@@ -40,7 +39,7 @@ body { background: #0f0f13; color: #e0e0e0; font-family: -apple-system, BlinkMac
 .price-box { text-align: center; flex: 1; }
 .price-box .plabel { font-size: 10px; color: #555; margin-bottom: 3px; }
 .price-box .pval { font-size: 15px; font-weight: 600; color: #fff; }
-.price-box .pval.loading { color: #444; font-size: 12px; }
+.price-box .pval.na { color: #444; font-size: 12px; }
 .price-arrow { color: #444; padding: 0 8px; font-size: 16px; }
 .pnl-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
 .pnl-label { font-size: 11px; color: #555; }
@@ -51,7 +50,7 @@ body { background: #0f0f13; color: #e0e0e0; font-family: -apple-system, BlinkMac
 .close-btn:hover { background: #3a1a1a; }
 .close-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .empty { text-align: center; color: #444; padding: 40px 0; font-size: 14px; }
-.toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #1a2a1a; border: 1px solid #22c55e44; color: #22c55e; padding: 10px 20px; border-radius: 8px; font-size: 13px; z-index: 999; display: none; }
+.toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #1a2a1a; border: 1px solid #22c55e44; color: #22c55e; padding: 10px 20px; border-radius: 8px; font-size: 13px; z-index: 999; display: none; white-space: nowrap; }
 .toast.err { background: #2a1a1a; border-color: #ef444444; color: #ef4444; }
 .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #1a1a24; border-top: 1px solid #2a2a3a; padding: 10px 16px; display: flex; gap: 8px; }
 .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; }
@@ -61,9 +60,7 @@ body { background: #0f0f13; color: #e0e0e0; font-family: -apple-system, BlinkMac
 </style>
 </head>
 <body>
-
 <div class="toast" id="toast"></div>
-
 <div class="header">
   <h1><span class="dot" id="dot"></span>POLYMARKET BOT</h1>
   <div style="display:flex;gap:8px;align-items:center;">
@@ -71,12 +68,10 @@ body { background: #0f0f13; color: #e0e0e0; font-family: -apple-system, BlinkMac
     <span style="font-size:12px;color:#444;" id="scanInfo">#0</span>
   </div>
 </div>
-
 <div class="toplam-bar">
   <div class="label">Toplam Param</div>
   <div class="value" id="totalValue">$-.--</div>
 </div>
-
 <div class="stats">
   <div class="stat">
     <div class="stat-label">Nakit</div>
@@ -93,7 +88,6 @@ body { background: #0f0f13; color: #e0e0e0; font-family: -apple-system, BlinkMac
     <div class="stat-sub" id="winRate">0%</div>
   </div>
 </div>
-
 <div class="section">
   <div class="section-title">
     Açık Pozisyonlar
@@ -101,15 +95,12 @@ body { background: #0f0f13; color: #e0e0e0; font-family: -apple-system, BlinkMac
   </div>
   <div id="positions"><div class="empty">Yükleniyor...</div></div>
 </div>
-
 <div class="bottom-bar">
   <button class="btn btn-refresh" onclick="load()">↻</button>
   <button class="btn btn-start" onclick="startBot()">▶ BAŞLAT</button>
   <button class="btn btn-stop" onclick="stopBot()">■ DURDUR</button>
 </div>
-
 <script>
-// Railway URL — aynı domain'den çekiliyor, boş bırak
 const API = window.location.origin;
 let positions = [];
 
@@ -118,7 +109,7 @@ function showToast(msg, err) {
   t.textContent = msg;
   t.className = 'toast' + (err ? ' err' : '');
   t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 3000);
+  setTimeout(function() { t.style.display = 'none'; }, 3000);
 }
 
 async function load() {
@@ -129,7 +120,6 @@ async function load() {
     positions = d.portfolio.open_positions || [];
     renderStats(d);
     renderPositions(positions);
-    fetchAllPrices(positions);
   } catch(e) {
     document.getElementById('positions').innerHTML = '<div class="empty">Hata: ' + e.message + '</div>';
   }
@@ -160,103 +150,67 @@ function renderPositions(pos) {
     return;
   }
   let html = '';
-  pos.forEach((p, i) => {
-    const entry = parseFloat(p.entry_price);
-    const size  = parseFloat(p.size_usd);
-    html += `
-      <div class="pos-card" id="card-${i}">
-        <div class="pos-top">
-          <div class="pos-title">${p.market_title || 'Bilinmiyor'}</div>
-          <span class="${p.side === 'YES' ? 'badge-yes' : 'badge-no'}">${p.side}</span>
-        </div>
-        <div class="pos-row">
-          <span><span class="trader-chip">${p.trader_name}</span>${p.opened_at || ''}</span>
-        </div>
-        <div class="pos-row">
-          <span>Boyut</span><span class="val">$${size.toFixed(2)}</span>
-        </div>
-        <div class="price-row">
-          <div class="price-box">
-            <div class="plabel">Alış Fiyatı</div>
-            <div class="pval">$${entry.toFixed(3)}</div>
-          </div>
-          <div class="price-arrow">→</div>
-          <div class="price-box" id="cur-${i}">
-            <div class="plabel">Güncel</div>
-            <div class="pval loading">...</div>
-          </div>
-        </div>
-        <div class="pnl-row" id="pnl-${i}">
-          <span class="pnl-label">Tahmini K/Z</span>
-          <span class="pnl-val" id="pnlval-${i}">hesaplanıyor</span>
-        </div>
-        <button class="close-btn" id="closebtn-${i}" onclick="closePosition('${p.position_id}', ${i})">
-          ✕ Pozisyonu Kapat
-        </button>
-      </div>`;
+  pos.forEach(function(p, i) {
+    const entry    = parseFloat(p.entry_price || 0);
+    const size     = parseFloat(p.size_usd || 0);
+    const curPrice = p.current_price;
+    const estPnl   = p.estimated_pnl;
+    const pnlPct   = p.pnl_pct;
+
+    let curHtml = '<div class="plabel">Güncel</div><div class="pval na">-</div>';
+    let pnlHtml = '<span class="pnl-label">Tahmini K/Z</span><span class="pnl-val" style="color:#444">-</span>';
+
+    if (curPrice !== null && curPrice !== undefined) {
+      curHtml = '<div class="plabel">Güncel</div><div class="pval">$' + curPrice.toFixed(3) + '</div>';
+      if (estPnl !== null && estPnl !== undefined) {
+        const sign = estPnl >= 0 ? '+' : '';
+        const cls  = estPnl >= 0 ? 'green' : 'red';
+        pnlHtml = '<span class="pnl-label">Tahmini K/Z</span><span class="pnl-val ' + cls + '">' +
+          sign + '$' + Math.abs(estPnl).toFixed(2) +
+          ' (' + sign + (pnlPct || 0).toFixed(1) + '%)</span>';
+      }
+    }
+
+    html += '<div class="pos-card" id="card-' + i + '">' +
+      '<div class="pos-top">' +
+        '<div class="pos-title">' + (p.market_title || 'Bilinmiyor') + '</div>' +
+        '<span class="' + (p.side === 'YES' ? 'badge-yes' : 'badge-no') + '">' + p.side + '</span>' +
+      '</div>' +
+      '<div class="pos-row"><span><span class="trader-chip">' + p.trader_name + '</span>' + (p.opened_at || '') + '</span></div>' +
+      '<div class="pos-row"><span>Boyut</span><span class="val">$' + size.toFixed(2) + '</span></div>' +
+      '<div class="price-row">' +
+        '<div class="price-box"><div class="plabel">Alış Fiyatı</div><div class="pval">$' + entry.toFixed(3) + '</div></div>' +
+        '<div class="price-arrow">→</div>' +
+        '<div class="price-box">' + curHtml + '</div>' +
+      '</div>' +
+      '<div class="pnl-row">' + pnlHtml + '</div>' +
+      '<button class="close-btn" id="closebtn-' + i + '" onclick="closePos(\'' + p.position_id + '\',' + i + ')">✕ Pozisyonu Kapat</button>' +
+    '</div>';
   });
   document.getElementById('positions').innerHTML = html;
 }
 
-async function fetchAllPrices(pos) {
-  if (!pos || pos.length === 0) return;
-  const token_ids = pos.map(p => p.token_id).filter(Boolean);
-  if (token_ids.length === 0) return;
-  try {
-    const r = await fetch(API + '/api/prices', {
-      method:  'POST',
-      headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify({token_ids})
-    });
-    if (!r.ok) return;
-    const d      = await r.json();
-    const prices = d.prices || {};
-    pos.forEach((p, i) => {
-      const price = prices[p.token_id];
-      if (price === undefined || price === null) return;
-      const entry = parseFloat(p.entry_price);
-      const size  = parseFloat(p.size_usd);
-      const pnl   = (size / entry) * (price - entry);
-      const pct   = entry > 0 ? ((price - entry) / entry * 100) : 0;
-      const sign  = pnl >= 0 ? '+' : '';
-      const cls   = pnl >= 0 ? 'green' : 'red';
-      const curEl = document.getElementById('cur-' + i);
-      if (curEl) curEl.innerHTML = `<div class="plabel">Güncel</div><div class="pval">$${price.toFixed(3)}</div>`;
-      const pnlEl = document.getElementById('pnlval-' + i);
-      if (pnlEl) {
-        pnlEl.textContent = `${sign}$${Math.abs(pnl).toFixed(2)} (${sign}${pct.toFixed(1)}%)`;
-        pnlEl.className = 'pnl-val ' + cls;
-      }
-    });
-  } catch(e) {
-    console.error('Fiyat cekme hatasi:', e);
-  }
-}
-
-async function closePosition(posId, idx) {
+async function closePos(posId, idx) {
   const btn = document.getElementById('closebtn-' + idx);
   if (btn) { btn.disabled = true; btn.textContent = 'Kapatılıyor...'; }
   try {
     const r = await fetch(API + '/api/close-position', {
-      method:  'POST',
+      method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify({position_id: posId})
+      body: JSON.stringify({position_id: posId})
     });
     const d = await r.json();
     if (d.ok) {
-      const sign = d.sign || '';
-      const pnl  = d.pnl !== undefined ? parseFloat(d.pnl).toFixed(2) : '?';
-      showToast(`Kapatıldı • PnL: ${sign}$${Math.abs(pnl)} • Nakit: $${parseFloat(d.cash).toFixed(2)}`);
+      const pnl  = parseFloat(d.pnl || 0);
+      const sign = pnl >= 0 ? '+' : '';
+      showToast('Kapatıldı • PnL: ' + sign + '$' + Math.abs(pnl).toFixed(2) + ' • Nakit: $' + parseFloat(d.cash || 0).toFixed(2));
       const card = document.getElementById('card-' + idx);
       if (card) { card.style.opacity = '0.3'; card.style.pointerEvents = 'none'; }
-      // Nakit ve toplam değeri anında güncelle
-      if (d.cash !== undefined) {
-        document.getElementById('cash').textContent = '$' + parseFloat(d.cash).toFixed(2);
-      }
+      if (d.cash) document.getElementById('cash').textContent = '$' + parseFloat(d.cash).toFixed(2);
       setTimeout(load, 1500);
     } else {
       if (btn) { btn.disabled = false; btn.textContent = '✕ Pozisyonu Kapat'; }
-      showToast(d.msg || 'Hata oluştu', true);
+      showToast(d.msg || 'Hata', true);
     }
   } catch(e) {
     if (btn) { btn.disabled = false; btn.textContent = '✕ Pozisyonu Kapat'; }
@@ -265,13 +219,13 @@ async function closePosition(posId, idx) {
 }
 
 async function startBot() {
-  await fetch(API + '/api/start', {method:'POST'});
+  await fetch(API + '/api/start', {method: 'POST'});
   showToast('Bot başlatıldı');
   setTimeout(load, 1000);
 }
 
 async function stopBot() {
-  await fetch(API + '/api/stop', {method:'POST'});
+  await fetch(API + '/api/stop', {method: 'POST'});
   showToast('Bot durduruldu', true);
   setTimeout(load, 1000);
 }
