@@ -964,18 +964,23 @@ def api_position_prices():
     """Her pozisyon icin anlik fiyat, PnL ve pnl_pct dondur"""
     portfolio = app_state["portfolio"]
     result    = {}
-    for pos_id, pos in list(portfolio.open_positions.items()):
-        if not pos.token_id:
+    # open_positions bir dict: {pos_id: Position}
+    items = list(portfolio.open_positions.items()) if isinstance(portfolio.open_positions, dict) else []
+    logging.info(f"position-prices: {len(items)} pozisyon isleniyor")
+    for pos_id, pos in items:
+        token_id = getattr(pos, 'token_id', '') or ''
+        if not token_id:
+            logging.warning(f"token_id yok: {pos_id}")
             continue
         try:
             resp = sync_requests.get(
-                f"{Config.CLOB_HOST}/last-trade-price?token_id={pos.token_id}",
+                f"{Config.CLOB_HOST}/last-trade-price?token_id={token_id}",
                 timeout=3
             )
             if resp.status_code == 200:
-                price = float(resp.json().get("price", float(pos.entry_price)))
-                entry = float(pos.entry_price)
-                size  = float(pos.size_usd)
+                price  = float(resp.json().get("price", float(pos.entry_price)))
+                entry  = float(pos.entry_price)
+                size   = float(pos.size_usd)
                 shares = size / entry if entry > 0 else 0
                 if pos.side == "YES":
                     pnl = shares * (price - entry)
@@ -986,8 +991,11 @@ def api_position_prices():
                     "estimated_pnl": round(pnl, 2),
                     "pnl_pct":       round((pnl / size * 100) if size > 0 else 0, 1),
                 }
+            else:
+                logging.warning(f"CLOB {resp.status_code} token: {token_id[:20]}")
         except Exception as e:
             logging.error(f"Fiyat cekme hatasi {pos_id}: {e}")
+    logging.info(f"position-prices: {len(result)} fiyat donduruluyor")
     return jsonify(result)
 
 @flask_app.route("/api/history")
