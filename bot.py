@@ -998,19 +998,47 @@ def api_del_trader(wallet):
 
 @flask_app.route("/api/close-position", methods=["POST"])
 def api_close_position():
-    data    = request.json or {}
-    pos_id  = data.get("position_id", "")
+    import requests as req
+    data      = request.json or {}
+    pos_id    = data.get("position_id", "")
     portfolio = app_state["portfolio"]
     if pos_id not in portfolio.open_positions:
         return jsonify({"ok": False, "msg": "Pozisyon bulunamadi"})
     pos = portfolio.open_positions[pos_id]
+    # Anlık fiyatı çek
+    try:
+        r = req.get(f"https://clob.polymarket.com/last-trade-price?token_id={pos.token_id}", timeout=5)
+        cur_price = Decimal(str(r.json().get("price", float(pos.entry_price)))) if r.status_code == 200 else pos.entry_price
+    except Exception:
+        cur_price = pos.entry_price
+    # PnL hesapla
+    shares = pos.size_usd / pos.entry_price
+    pnl    = shares * (cur_price - pos.entry_price)
     with _portfolio_lock:
-        portfolio.cash += pos.size_usd
-        portfolio.realized_pnl += Decimal("0")
+        portfolio.cash         += pos.size_usd + pnl - (pos.size_usd * Config.COMMISSION_RATE)
+        portfolio.realized_pnl += pnl
+        if pnl >= 0:
+            portfolio.winning_trades += 1
+        else:
+            portfolio.losing_trades  += 1
+        app_state["day_trades"].append({
+            "time":   datetime.now().strftime("%H:%M"),
+            "trader": pos.trader_name,
+            "market": pos.market_title,
+            "side":   pos.side,
+            "pnl":    float(pnl),
+        })
         del portfolio.open_positions[pos_id]
     save_portfolio(portfolio)
-    logging.info(f"Pozisyon manuel kapatildi: {pos_id}")
-    return jsonify({"ok": True, "msg": f"{pos.market_title[:40]} kapatildi"})
+    sign = "+" if pnl >= 0 else ""
+    logging.info(f"Pozisyon manuel kapatildi: {pos.market_title[:40]} PnL:{sign}${float(pnl):.2f}")
+    return jsonify({
+        "ok":      True,
+        "msg":     f"{pos.market_title[:40]} kapatildi",
+        "pnl":     float(pnl),
+        "cash":    float(portfolio.cash),
+        "sign":    sign,
+    })
 
 @flask_app.route("/api/close-all", methods=["POST"])
 def api_close_all():
