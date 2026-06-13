@@ -948,8 +948,40 @@ def index():
 
 @flask_app.route("/api/status")
 def api_status():
+    import requests as req
     portfolio = app_state["portfolio"]
     d = portfolio.to_dict()
+
+    # Her pozisyon için anlık fiyat ekle
+    positions = d.get("open_positions", [])
+    for pos in positions:
+        token_id = pos.get("token_id", "")
+        if not token_id:
+            pos["current_price"] = None
+            continue
+        try:
+            r = req.get(
+                f"https://clob.polymarket.com/last-trade-price?token_id={token_id}",
+                timeout=3
+            )
+            if r.status_code == 200:
+                price = float(r.json().get("price", 0))
+                pos["current_price"] = price
+                # Tahmini PnL hesapla
+                entry = float(pos.get("entry_price", 0))
+                size  = float(pos.get("size_usd", 0))
+                if entry > 0:
+                    pnl = (size / entry) * (price - entry)
+                    pos["estimated_pnl"] = round(pnl, 2)
+                    pos["pnl_pct"] = round((price - entry) / entry * 100, 1)
+                else:
+                    pos["estimated_pnl"] = 0
+                    pos["pnl_pct"] = 0
+            else:
+                pos["current_price"] = None
+        except Exception:
+            pos["current_price"] = None
+
     return jsonify({
         "running":       app_state["running"],
         "scan_count":    app_state["scan_count"],
