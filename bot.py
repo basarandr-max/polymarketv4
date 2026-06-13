@@ -996,6 +996,22 @@ def api_del_trader(wallet):
     save_traders(app_state["tracked_users"])
     return jsonify({"ok": True, "msg": "Trader silindi"})
 
+@flask_app.route("/api/close-position", methods=["POST"])
+def api_close_position():
+    data    = request.json or {}
+    pos_id  = data.get("position_id", "")
+    portfolio = app_state["portfolio"]
+    if pos_id not in portfolio.open_positions:
+        return jsonify({"ok": False, "msg": "Pozisyon bulunamadi"})
+    pos = portfolio.open_positions[pos_id]
+    with _portfolio_lock:
+        portfolio.cash += pos.size_usd
+        portfolio.realized_pnl += Decimal("0")
+        del portfolio.open_positions[pos_id]
+    save_portfolio(portfolio)
+    logging.info(f"Pozisyon manuel kapatildi: {pos_id}")
+    return jsonify({"ok": True, "msg": f"{pos.market_title[:40]} kapatildi"})
+
 @flask_app.route("/api/close-all", methods=["POST"])
 def api_close_all():
     portfolio = app_state["portfolio"]
